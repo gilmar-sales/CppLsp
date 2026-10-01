@@ -32,3 +32,13 @@ add_test(
           "-DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckSemanticCli.cmake"
 )
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME LspProtocolSmoke
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspProtocolSmoke.py"
+            "$<TARGET_FILE:cpplsp-lsp>" "${PROJECT_BINARY_DIR}/compile_commands.json"
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
+  )
+endif ()

@@ -1,0 +1,65 @@
+{
+  "name": "cpplsp-vscode",
+  "displayName": "CppLsp - C++ Lint and Format",
+  "description": "C++ diagnostics, quick fixes, and formatting powered by CppLsp.",
+  "version": "0.1.0",
+  "publisher": "gilmar-sales",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onLanguage:cuda",
+    "onLanguage:objective-c",
+    "onLanguage:objective-cpp"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "CppLsp",
+      "properties": {
+        "cpplsp.serverPath": {
+          "type": "string",
+          "default": "cpplsp-lsp",
+          "description": "Path to the cpplsp-lsp executable. By default it is searched in PATH and common build directories."
+        },
+        "cpplsp.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace JSON-RPC traffic between VS Code and cpplsp-lsp."
+        },
+        "cpplsp.enableSemantic": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable simple local semantic diagnostics using compile_commands.json."
+        },
+        "cpplsp.compileCommands": {
+          "type": "string",
+          "default": "build/compile_commands.json",
+          "description": "Path to compile_commands.json, relative to the first workspace folder unless absolute."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}

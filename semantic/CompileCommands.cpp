@@ -1,9 +1,9 @@
 #include <CppLsp/CompileCommands.hpp>
 
 #include <simdjson.h>
+#include <Skirnir/Configuration/JsonFileSource.hpp>
 
-#include <fstream>
-#include <sstream>
+#include <exception>
 #include <system_error>
 #include <algorithm>
 
@@ -115,17 +115,15 @@ bool GetString(simdjson::dom::object object, const char* key, std::string& outpu
 
 std::expected<CompileDatabase, std::string> CompileDatabase::Load(const std::filesystem::path& path)
 {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return std::unexpected("cannot open compile database: " + path.string());
-    std::ostringstream contents;
-    contents << input.rdbuf();
-
-    const std::string json = contents.str();
-    simdjson::dom::parser parser;
+    skr::JsonFileSource json_source(path, -1);
     simdjson::dom::element document;
-    if (parser.parse(json).get(document))
+    try
     {
-        return std::unexpected("invalid compile database JSON");
+        document = json_source.Load();
+    }
+    catch (const std::exception& error)
+    {
+        return std::unexpected("cannot parse compile database '" + path.string() + "': " + error.what());
     }
     simdjson::dom::array entries;
     if (document.get_array().get(entries))

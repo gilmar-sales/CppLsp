@@ -1,15 +1,15 @@
 # CppLsp
 
-C++ project: a Biome/Oxlint-style engine for C++ plus a Baldr-based server scaffold.
+C++ project: a Biome/Oxlint-style engine with a standalone LSP server for VS Code.
 Structure mirrors [Freyr](https://github.com/gilmar-sales/Freyr).
 
 ## Dependency policy
 
 - **`cpplsp_core` (`core/`, `include/CppLsp/`): standard library only.** No third-party
   code, no exceptions, no RTTI. Enforced by `test/src/CorePolicySpec.cpp`.
-- **Outside core, third parties are allowed**: [Baldr](https://github.com/gilmar-sales/Baldr)
-  (commit da `v0.1.0`) for the server, its `simdjson` target for `compile_commands.json`, GoogleTest `v1.17.0` for tests,
-  Google Benchmark `v1.9.5` for benches — all via `FetchContent`.
+- **Outside core, third parties are allowed**: [Skirnir](https://github.com/gilmar-sales/Skirnir)
+  with its `simdjson` dependency for `compile_commands.json` and LSP JSON-RPC,
+  GoogleTest `v1.17.0` for tests, and Google Benchmark `v1.9.5` for benches — via `FetchContent`.
 
 ## Requirements
 
@@ -45,31 +45,35 @@ set and an atomic work index; results are emitted in sorted path order. The
 current formatter only normalizes brace-depth indentation. `check` exits 1 if
 lint diagnostics are found; I/O or CLI errors exit 2.
 
-## Run
+## VS Code extension
+
+The independent extension is in `vscode-extension/` and talks to `cpplsp-lsp` over
+LSP JSON-RPC stdio:
 
 ```bash
-./build/cpplsp-server
-curl http://localhost:8080/json
-# { "message": "Hello, World!" }
+cmake --build build --target cpplsp-lsp
+cd vscode-extension
+npm install
+npm run compile
 ```
 
-The `examples/HelloWorld` target is the verbatim
-[Baldr get-started](https://gilmar-sales.github.io/Baldr/get-started/) sample:
-
-```bash
-./build/examples/HelloWorld/HelloWorld
-```
+Open `vscode-extension/` in VS Code and press F5 to launch the Extension Development
+Host. It provides C/C++ diagnostics, `NULL` quick fixes, and the current
+brace-indent formatter. Set `cpplsp.serverPath` if the server is not found in the
+workspace build directory or `PATH`. This replaces the lint/format portion of
+Microsoft's extension; IntelliSense, debugging, and build integration are not
+implemented yet.
 
 ## Layout
 
 ```text
-CMakeLists.txt          # root: ccache, FetchContent(baldr), core + server + tests + examples + benches
+CMakeLists.txt          # root: ccache, FetchContent(Skirnir/simdjson), core + CLI + LSP + tests + benches
 core/                   # cpplsp_core: zero-dependency engine (MappedBuffer, Arena, LineTable, Lexer, Preprocessor, CST, rules, formatter)
 include/CppLsp/         # core public headers (STL-only)
-src/main.cpp            # cpplsp-server (Baldr Hello World)
 src/cli.cpp             # cpplsp lint/check/format CLI
-semantic/               # compile database reader (simdjson) + local type oracle
-examples/HelloWorld/    # standalone Baldr get-started sample
+lsp/main.cpp            # cpplsp-lsp: JSON-RPC over stdio
+semantic/               # Skirnir JSON source + compile database reader + local type oracle
+vscode-extension/       # VS Code extension manifest and LSP client
 test/                   # GoogleTest suite, incl. core dependency-policy guard
 bench/                  # Google Benchmark suite (I/O, arena, line table, lexer, preprocessor, CST, rules, formatter) + corpus
 ```
@@ -101,8 +105,8 @@ bench/                  # Google Benchmark suite (I/O, arena, line table, lexer,
 - **Formatter foundation**: brace-depth indentation using lexer tokens, configurable
   spaces/tabs, preserving CRLF, blank lines, comments, literals, and preprocessor
   directives. It intentionally does not yet reflow lines or normalize operator spacing.
-- **Compilation database / semantic seed**: `cpplsp_semantic` uses Baldr's existing
-  `simdjson` target to read `compile_commands.json` (`arguments` or `command`) and
+- **Compilation database / semantic seed**: `cpplsp_semantic` uses Skirnir's
+  `JsonFileSource` (backed by `simdjson`) to read `compile_commands.json` (`arguments` or `command`) and
   extracts `-D`, `-U`, and `-I` options. Its local type oracle recognizes built-ins
   and declarations in the current file, so it can distinguish simple `A * b;` forms
   when `A` is known. It does not open include directories or implement full C++ name
