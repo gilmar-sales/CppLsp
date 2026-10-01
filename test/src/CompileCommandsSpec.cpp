@@ -59,3 +59,36 @@ TEST(SemanticSpec, UsesLocalTypeNamesToResolveAsteriskAmbiguity)
               cpplsp::AsteriskMeaning::Multiplication);
     EXPECT_EQ(analyzer.ClassifyAsteriskStatement("int * b;", types), cpplsp::AsteriskMeaning::Declaration);
 }
+
+TEST(SemanticSpec, FindsUnusedSimpleLocalsOnlyInsideFunctionBodies)
+{
+    constexpr std::string_view source =
+        "int global_value;\n"
+        "struct Holder { int field; };\n"
+        "void f() {\n"
+        "  int unused = 1;\n"
+        "  int used = 2;\n"
+        "  consume(used);\n"
+        "}\n";
+    const cpplsp::SemanticAnalyzer analyzer;
+    const auto diagnostics = analyzer.AnalyzeUnusedLocals(source);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].code, "CPPLSP101");
+    EXPECT_EQ(diagnostics[0].message, "local variable 'unused' is never used");
+    EXPECT_EQ(diagnostics[0].line, 4);
+}
+
+TEST(SemanticSpec, HonorsConditionalBranchesAndCompileCommandDefines)
+{
+    constexpr std::string_view source =
+        "#ifdef FEATURE\n"
+        "void enabled() { int active_unused; }\n"
+        "#else\n"
+        "void disabled() { int inactive_unused; }\n"
+        "#endif\n";
+    cpplsp::CompileCommand command;
+    command.defines.emplace("FEATURE", "1");
+    const auto diagnostics = cpplsp::SemanticAnalyzer().AnalyzeUnusedLocals(source, &command);
+    ASSERT_EQ(diagnostics.size(), 1);
+    EXPECT_EQ(diagnostics[0].message, "local variable 'active_unused' is never used");
+}

@@ -71,6 +71,45 @@ bool IsPunctuatorStart(char c)
     return punct.find(c) != std::string_view::npos;
 }
 
+std::size_t PunctuatorLength(std::string_view source, std::size_t offset)
+{
+    const std::string_view tail = source.substr(offset);
+    auto is = [tail](std::string_view punctuator) { return tail.starts_with(punctuator); };
+    switch (source[offset])
+    {
+    case '%':
+        if (is("%:%:")) return 4;
+        if (is("%=") || is("%>") || is("%:")) return 2;
+        break;
+    case '#': if (is("##")) return 2; break;
+    case ':': if (is("::") || is(":>")) return 2; break;
+    case '.': if (is("...") || is(".*")) return is("...") ? 3 : 2; break;
+    case '-':
+        if (is("->*")) return 3;
+        if (is("->") || is("--") || is("-=")) return 2;
+        break;
+    case '<':
+        if (is("<=>")) return 3;
+        if (is("<<=")) return 3;
+        if (is("<<") || is("<=") || is("<:") || is("<%")) return 2;
+        break;
+    case '>':
+        if (is(">>=")) return 3;
+        if (is(">>") || is(">=")) return 2;
+        break;
+    case '+': if (is("++") || is("+=")) return 2; break;
+    case '*': if (is("*=")) return 2; break;
+    case '/': if (is("/=")) return 2; break;
+    case '&': if (is("&&") || is("&=")) return 2; break;
+    case '|': if (is("||") || is("|=")) return 2; break;
+    case '^': if (is("^=")) return 2; break;
+    case '=': if (is("==")) return 2; break;
+    case '!': if (is("!=")) return 2; break;
+    default: break;
+    }
+    return 1;
+}
+
 } // namespace
 
 std::vector<Token> Lexer::Lex() const
@@ -198,7 +237,7 @@ std::vector<Token> Lexer::Lex() const
             else if (IsPunctuatorStart(c))
             {
                 kind = TokenKind::Punctuation;
-                ++i;
+                i += PunctuatorLength(m_source, i);
             }
             else
             {

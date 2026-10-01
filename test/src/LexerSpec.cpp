@@ -90,6 +90,20 @@ TEST(LexerSpec, UnterminatedConstructsConsumeToEndWithoutLosingBytes)
     }
 }
 
+TEST(LexerSpec, UsesMaximalMunchForMultiCharacterPunctuators)
+{
+    constexpr std::string_view source = "a::b->c == d && e <=> f ... g <<= 1";
+    const cpplsp::Lexer lexer(source);
+    const auto tokens = lexer.Lex();
+    std::vector<std::string_view> punctuators;
+    for (const auto& token : tokens)
+    {
+        if (token.kind == cpplsp::TokenKind::Punctuation) punctuators.push_back(lexer.Text(token));
+    }
+    EXPECT_EQ(punctuators, (std::vector<std::string_view> { "::", "->", "==", "&&", "<=>", "...", "<<=" }));
+    EXPECT_EQ(Reconstruct(source, tokens), source);
+}
+
 TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
 {
     const auto corpus = std::filesystem::path(CPPLSP_SOURCE_DIR) / "bench" / "corpus";

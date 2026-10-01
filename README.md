@@ -77,10 +77,12 @@ bench/                  # Google Benchmark suite (I/O, arena, line table, lexer,
 ## Implemented core stages
 
 - **Lexer**: byte-lossless token spans with trivia, comments, identifiers, numbers,
-  punctuators and ordinary/raw literals; malformed literals/comments recover to EOF.
+  maximal-munch C++ punctuators and ordinary/raw literals; malformed literals/comments
+  recover to EOF.
 - **Preprocessor subset**: classifies and retains directive spans, evaluates nested
   `#if` / `#ifdef` / `#ifndef` / `#elif` / `#else` / `#endif`, handles `#define` /
   `#undef` for object-like macros, and expands those macros outside comments/literals.
+  Integer comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) are supported in `#if`.
   `#include` is deliberately opaque: no headers are opened. Function-like macros,
   token pasting/stringification and full C++ preprocessor expression semantics are
   not implemented yet; they are left unexpanded rather than guessed.
@@ -92,6 +94,10 @@ bench/                  # Google Benchmark suite (I/O, arena, line table, lexer,
   literals and directives; `CPPLSP002` removes trailing spaces/tabs. Diagnostics
   carry byte ranges and 1-based line/column, with non-overlapping text edits applied
   from right to left. Rules can be enabled independently.
+- **Local semantic rule**: `CPPLSP101` reports unused simple local variables when
+  run with `--semantic --compile-commands ...`. It only covers basic declarations
+  in function bodies (built-in/current-file types); complex declarators, parameters,
+  captures, shadowing and include-provided types are outside the current subset.
 - **Formatter foundation**: brace-depth indentation using lexer tokens, configurable
   spaces/tabs, preserving CRLF, blank lines, comments, literals, and preprocessor
   directives. It intentionally does not yet reflow lines or normalize operator spacing.

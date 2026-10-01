@@ -60,3 +60,17 @@ TEST(PreprocessorSpec, DoesNotExpandMacrosInsideQuotedLiterals)
     const auto result = cpplsp::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n");
     EXPECT_EQ(result.active_source, "const char* s = \"NAME\"; // NAME\n");
 }
+
+TEST(PreprocessorSpec, EvaluatesIntegerComparisonsInIfExpressions)
+{
+    constexpr std::string_view source =
+        "#define VERSION 2\n"
+        "#if VERSION >= 2 && VERSION != 3\n"
+        "selected\n"
+        "#else\n"
+        "rejected\n"
+        "#endif\n";
+    const auto result = cpplsp::Preprocessor().Process(source);
+    EXPECT_EQ(result.active_source, "selected\n");
+    EXPECT_TRUE(result.diagnostics.empty());
+}

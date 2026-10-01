@@ -38,12 +38,19 @@ struct PreprocessorDiagnostic
     std::string message;
 };
 
+struct ActiveSourceRange
+{
+    std::size_t offset;
+    std::size_t length;
+};
+
 struct PreprocessorResult
 {
     // Active non-directive source, with object-like macro substitutions.
     // Includes/directives are intentionally not opened or expanded.
     std::string active_source;
     std::vector<PreprocessorDirective> directives;
+    std::vector<ActiveSourceRange> active_ranges;
     std::vector<PreprocessorDiagnostic> diagnostics;
 };
 

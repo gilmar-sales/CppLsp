@@ -45,6 +45,7 @@ struct FileResult
     fs::path path;
     std::string error;
     std::vector<cpplsp::Diagnostic> diagnostics;
+    std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
     std::string output;
     bool changed = false;
     bool has_semantic_context = false;
@@ -229,6 +230,7 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
             const cpplsp::SemanticAnalyzer analyzer;
             const auto types = analyzer.CollectTypeNames(source, command);
             result.type_count = types.size();
+            result.semantic_diagnostics = analyzer.AnalyzeUnusedLocals(source, command);
             std::unordered_set<std::string> no_values;
             std::size_t line_start = 0;
             while (line_start < source.size())
@@ -358,6 +360,16 @@ int main(int argc, char** argv)
                           << "\"}";
                 has_diagnostics = true;
             }
+            for (const auto& diagnostic : result.semantic_diagnostics)
+            {
+                if (!first) std::cout << ',';
+                first = false;
+                std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
+                          << ",\"column\":" << diagnostic.column << ",\"severity\":\"warning\",\"code\":\""
+                          << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
+                          << "\"}";
+                has_diagnostics = true;
+            }
         }
         std::cout << "]\n";
     }
@@ -407,6 +419,12 @@ int main(int argc, char** argv)
                 std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column << ": warning "
                           << diagnostic.code << ": " << diagnostic.message << '\n';
             }
+            for (const auto& diagnostic : result.semantic_diagnostics)
+            {
+                std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
+                          << ": warning " << diagnostic.code << ": " << diagnostic.message << '\n';
+            }
+            has_diagnostics |= !result.semantic_diagnostics.empty();
             if (options.fix && result.changed && !WriteFile(result.path, result.output))
             {
                 std::cerr << result.path.string() << ": failed to write fixes\n";

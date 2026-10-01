@@ -58,9 +58,9 @@ class IfExpression
 
     bool Evaluate()
     {
-        const bool value = ParseOr();
+        const long long value = ParseOr();
         SkipSpace();
-        return value && m_pos == m_input.size();
+        return value != 0 && m_pos == m_input.size();
     }
 
   private:
@@ -83,37 +83,49 @@ class IfExpression
         return true;
     }
 
-    bool ParseOr()
+    long long ParseOr()
     {
-        bool value = ParseAnd();
+        long long value = ParseAnd();
         while (Consume("||"))
         {
-            const bool rhs = ParseAnd();
-            value = value || rhs;
+            const long long rhs = ParseAnd();
+            value = value != 0 || rhs != 0;
         }
         return value;
     }
 
-    bool ParseAnd()
+    long long ParseAnd()
     {
-        bool value = ParseUnary();
+        long long value = ParseCompare();
         while (Consume("&&"))
         {
-            const bool rhs = ParseUnary();
-            value = value && rhs;
+            const long long rhs = ParseCompare();
+            value = value != 0 && rhs != 0;
         }
         return value;
     }
 
-    bool ParseUnary()
+    long long ParseCompare()
+    {
+        const long long lhs = ParseUnary();
+        if (Consume("==")) return lhs == ParseUnary();
+        if (Consume("!=")) return lhs != ParseUnary();
+        if (Consume("<=")) return lhs <= ParseUnary();
+        if (Consume(">=")) return lhs >= ParseUnary();
+        if (Consume("<")) return lhs < ParseUnary();
+        if (Consume(">")) return lhs > ParseUnary();
+        return lhs;
+    }
+
+    long long ParseUnary()
     {
         if (Consume("!"))
         {
-            return !ParseUnary();
+            return ParseUnary() == 0;
         }
         if (Consume("("))
         {
-            const bool value = ParseOr();
+            const long long value = ParseOr();
             Consume(")");
             return value;
         }
@@ -134,7 +146,7 @@ class IfExpression
             {
                 Consume(")");
             }
-            return m_macros.contains(name);
+            return m_macros.contains(name) ? 1 : 0;
         }
 
         const std::size_t start = m_pos;
@@ -148,7 +160,7 @@ class IfExpression
         }
         if (start == m_pos)
         {
-            return false;
+            return 0;
         }
 
         std::string_view atom = m_input.substr(start, m_pos - start);
@@ -157,18 +169,29 @@ class IfExpression
             const auto it = m_macros.find(std::string(atom));
             if (it == m_macros.end())
             {
-                return false;
+                return 0;
             }
             atom = Trim(it->second);
         }
+        while (!atom.empty() && (atom.back() == 'u' || atom.back() == 'U' || atom.back() == 'l' || atom.back() == 'L'))
+        {
+            atom.remove_suffix(1);
+        }
         long long number = 0;
-        const int base = atom.size() > 2 && atom[0] == '0' && (atom[1] == 'x' || atom[1] == 'X') ? 16 : 10;
+        int base = 10;
+        if (atom.size() > 2 && atom[0] == '0' && (atom[1] == 'x' || atom[1] == 'X')) base = 16;
+        else if (atom.size() > 1 && atom[0] == '0') base = 8;
         if (base == 16)
         {
             atom.remove_prefix(2);
         }
+        else if (base == 8)
+        {
+            atom.remove_prefix(1);
+            if (atom.empty()) return 0;
+        }
         const auto parsed = std::from_chars(atom.data(), atom.data() + atom.size(), number, base);
-        return parsed.ec == std::errc {} && parsed.ptr == atom.data() + atom.size() && number != 0;
+        return parsed.ec == std::errc {} && parsed.ptr == atom.data() + atom.size() ? number : 0;
     }
 
     std::string_view m_input;
@@ -380,6 +403,7 @@ PreprocessorResult Preprocessor::Process(std::string_view source) const
         }
         else if (active)
         {
+            result.active_ranges.push_back({ line_start, line.size() });
             result.active_source += ExpandObjectMacros(line, macros);
         }
         offset = end;
