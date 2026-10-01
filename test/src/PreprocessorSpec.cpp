@@ -1,0 +1,62 @@
+#include <gtest/gtest.h>
+
+#include <CppLsp/Preprocessor.hpp>
+
+#include <string>
+
+TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
+{
+    constexpr std::string_view source =
+        "#include <vector>\n"
+        "#define ENABLED 1\n"
+        "#if defined(ENABLED) && ENABLED\n"
+        "int selected = ENABLED;\n"
+        "#else\n"
+        "int rejected;\n"
+        "#endif\n";
+
+    const auto result = cpplsp::Preprocessor().Process(source);
+    EXPECT_EQ(result.active_source, "int selected = 1;\n");
+    ASSERT_EQ(result.directives.size(), 5);
+    EXPECT_EQ(result.directives.front().kind, cpplsp::DirectiveKind::Include);
+    ASSERT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+}
+
+TEST(PreprocessorSpec, SupportsNestedConditionalsAndUndef)
+{
+    constexpr std::string_view source =
+        "#define FLAG 1\n"
+        "#if FLAG\n"
+        "outer\n"
+        "#if 0\n"
+        "inner_no\n"
+        "#else\n"
+        "inner_yes\n"
+        "#endif\n"
+        "#undef FLAG\n"
+        "#endif\n"
+        "#ifdef FLAG\n"
+        "undefined_no\n"
+        "#else\n"
+        "undefined_yes\n"
+        "#endif\n";
+
+    const auto result = cpplsp::Preprocessor().Process(source);
+    EXPECT_EQ(result.active_source, "outer\ninner_yes\nundefined_yes\n");
+    ASSERT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+}
+
+TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
+{
+    const auto result = cpplsp::Preprocessor().Process("#else\n#if 1\nactive\n");
+    EXPECT_EQ(result.diagnostics.size(), 2);
+    EXPECT_EQ(result.diagnostics[0].message, "#else without matching #if");
+    EXPECT_EQ(result.diagnostics[1].message, "unterminated conditional directive");
+    EXPECT_EQ(result.active_source, "active\n");
+}
+
+TEST(PreprocessorSpec, DoesNotExpandMacrosInsideQuotedLiterals)
+{
+    const auto result = cpplsp::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n");
+    EXPECT_EQ(result.active_source, "const char* s = \"NAME\"; // NAME\n");
+}

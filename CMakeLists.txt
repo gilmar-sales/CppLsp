@@ -5,6 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
   option(CPPLSP_BUILD_TESTS "Build CppLsp tests" ON)
   option(CPPLSP_BUILD_EXAMPLES "Build CppLsp examples" ON)
+  option(CPPLSP_BUILD_BENCHMARKS "Build CppLsp benchmarks" ON)
 
   find_program(CPPLSP_CCACHE_PROGRAM ccache)
   if (CPPLSP_CCACHE_PROGRAM)
@@ -17,6 +18,7 @@ if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
 else ()
   option(CPPLSP_BUILD_TESTS "Build CppLsp tests" OFF)
   option(CPPLSP_BUILD_EXAMPLES "Build CppLsp examples" OFF)
+  option(CPPLSP_BUILD_BENCHMARKS "Build CppLsp benchmarks" OFF)
 endif ()
 
 include(FetchContent)
@@ -33,29 +35,30 @@ FetchContent_MakeAvailable(baldr)
 
 project(CppLsp VERSION 0.1.0 LANGUAGES C CXX)
 
-file(GLOB_RECURSE CPPLSP_SOURCES
-  src/**.cpp
-  include/**.hpp
+# Dependency policy: cpplsp_core is standard-library-only (see core/CMakeLists.txt
+# and test/src/CorePolicySpec.cpp). Baldr/simdjson, gtest and Google Benchmark
+# are used only outside core: semantic module, server, tests and benches.
+add_subdirectory(core)
+
+add_library(cpplsp_semantic STATIC
+  semantic/CompileCommands.cpp
+  semantic/Semantic.cpp
 )
-
-list(FILTER CPPLSP_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
-
-add_library(cpplsp ${CPPLSP_SOURCES})
-add_library(cpplsp::cpplsp ALIAS cpplsp)
-
-target_link_libraries(cpplsp PUBLIC baldr)
-
-target_include_directories(cpplsp PUBLIC
-  $<BUILD_INTERFACE:${cpplsp_SOURCE_DIR}/include>
+add_library(cpplsp::semantic ALIAS cpplsp_semantic)
+target_include_directories(cpplsp_semantic PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-
-target_compile_features(cpplsp PUBLIC cxx_std_26)
+target_compile_features(cpplsp_semantic PUBLIC cxx_std_26)
+target_link_libraries(cpplsp_semantic PUBLIC cpplsp::core PRIVATE simdjson::simdjson)
 
 add_executable(cpplsp-server src/main.cpp)
-target_link_libraries(cpplsp-server PRIVATE cpplsp::cpplsp baldr)
+target_link_libraries(cpplsp-server PRIVATE cpplsp::core baldr)
 target_compile_features(cpplsp-server PRIVATE cxx_std_26)
+
+add_executable(cpplsp src/cli.cpp)
+target_link_libraries(cpplsp PRIVATE cpplsp::core cpplsp::semantic)
+target_compile_features(cpplsp PRIVATE cxx_std_26)
 
 if (CPPLSP_BUILD_TESTS)
   enable_testing()
@@ -65,4 +68,8 @@ endif ()
 
 if (CPPLSP_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif ()
+
+if (CPPLSP_BUILD_BENCHMARKS)
+  add_subdirectory(bench)
 endif ()
