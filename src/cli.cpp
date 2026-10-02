@@ -92,6 +92,7 @@ std::string_view GrammarKindName(cpplsp::GrammarKind kind)
     case GrammarKind::FunctionDeclaration: return "FunctionDeclaration";
     case GrammarKind::NamespaceDefinition: return "NamespaceDefinition";
     case GrammarKind::RecordDefinition: return "RecordDefinition";
+    case GrammarKind::Enumerator: return "Enumerator";
     case GrammarKind::CompoundStatement: return "CompoundStatement";
     case GrammarKind::DeclarationStatement: return "DeclarationStatement";
     case GrammarKind::ExpressionStatement: return "ExpressionStatement";

@@ -67,7 +67,9 @@ npm run compile
 ```
 
 Open `vscode-extension/` in VS Code and press F5 to launch the Extension Development
-Host. It provides C/C++ diagnostics, `NULL` quick fixes, and the current
+Host. It provides C/C++ diagnostics (rule lints plus parser-based `CPPLSP900`
+syntax errors using the file's `compile_commands.json` dialect and macros),
+`NULL` quick fixes, and the current
 brace-indent formatter. Set `cpplsp.serverPath` if the server is not found in the
 workspace build directory or `PATH`. This replaces the lint/format portion of
 Microsoft's extension; IntelliSense, debugging, and build integration are not

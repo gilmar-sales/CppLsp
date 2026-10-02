@@ -244,3 +244,27 @@ TEST(ParserSpec, ParsesLeadingRequiresClausesBeforeDeclarationsAndDefinitions)
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 2);
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
 }
+
+TEST(ParserSpec, ParsesEnumDefinitionsWithCommaSeparatedEnumerators)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "namespace fs = std::filesystem;\n"
+        "namespace\n"
+        "{\n"
+        "enum class Command\n"
+        "{\n"
+        "    Lint,\n"
+        "    Check,\n"
+        "    Format = 4,\n"
+        "    Parse = Lint | Check\n"
+        "};\n"
+        "}\n"
+        "enum Old { A = 1 << 2, B, C };\n"
+        "enum class Mode : unsigned char { Off, On };\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RecordDefinition), 3);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Enumerator), 9);
+    // 9 enumerators plus the `fs` namespace-alias name.
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 10);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NamespaceDefinition), 1);
+}

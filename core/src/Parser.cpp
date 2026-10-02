@@ -1582,6 +1582,44 @@ class GrammarParser
         return node;
     }
 
+    // Enum bodies hold comma-separated enumerators (`A, B = expr`), not the
+    // semicolon-terminated declarations that ordinary record scopes expect.
+    void ParseEnumerators(std::size_t begin, std::size_t end, std::size_t parent)
+    {
+        auto pos = begin;
+        while (pos < end)
+        {
+            if (IsDirective(pos))
+            {
+                pos = SkipDirective(pos, end, parent);
+                continue;
+            }
+            const auto comma = FindComma(pos, end);
+            const auto stop = comma < end ? comma : end;
+            if (stop > pos)
+            {
+                const auto enumerator = Add(GrammarKind::Enumerator, pos, stop, parent);
+                auto name = SkipAttributes(pos, stop, enumerator);
+                if (IsIdentifierToken(name) && name < stop)
+                {
+                    Add(GrammarKind::DeclaredName, name, name + 1, enumerator);
+                    ++name;
+                    name = SkipAttributes(name, stop, enumerator);
+                }
+                for (auto i = name; i < stop; ++i)
+                {
+                    if (Is(i, "="))
+                    {
+                        ParseExpression(i + 1, stop, enumerator);
+                        break;
+                    }
+                }
+            }
+            if (comma >= end) break;
+            pos = comma + 1;
+        }
+    }
+
     void ParseScope(std::size_t begin, std::size_t end, std::size_t parent, bool member_scope)
     {
         auto pos = begin;
@@ -1722,7 +1760,10 @@ class GrammarParser
                 }
                 if (node_kind == GrammarKind::NamespaceDefinition || node_kind == GrammarKind::RecordDefinition)
                 {
-                    ParseScope(brace + 1, close, node, node_kind == GrammarKind::RecordDefinition);
+                    if (node_kind == GrammarKind::RecordDefinition && Is(declaration_start, "enum"))
+                        ParseEnumerators(brace + 1, close, node);
+                    else
+                        ParseScope(brace + 1, close, node, node_kind == GrammarKind::RecordDefinition);
                     if (!closed)
                         m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[brace]].offset,
                                                          "expected '}' to close definition" });

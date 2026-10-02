@@ -1,4 +1,5 @@
 #include <CppLsp/Formatter.hpp>
+#include <CppLsp/Parser.hpp>
 #include <CppLsp/Rules.hpp>
 #include <CppLsp/CompileCommands.hpp>
 #include <CppLsp/Semantic.hpp>
@@ -249,9 +250,12 @@ class LanguageServer
         simdjson::dom::object params;
         simdjson::dom::object options;
         if (!GetObject(request, "params", params) || !GetObject(params, "initializationOptions", options)) return;
-        bool enabled = false;
-        if (const auto error = options["enableSemantic"].get_bool().get(enabled); error) enabled = false;
-        if (!enabled) return;
+        // The compile database feeds both the parser (dialect + predefined macros)
+        // and the optional semantic analysis, so load it whenever a path is given.
+        if (const auto error = options["enableSemantic"].get_bool().get(m_enable_semantic); error)
+        {
+            m_enable_semantic = false;
+        }
 
         std::string_view path;
         if (!GetString(options, "compileCommands", path) || path.empty()) return;
@@ -272,14 +276,18 @@ class LanguageServer
     void PublishDiagnostics(std::string_view uri, const Document& document)
     {
         const auto diagnostics = cpplsp::RuleEngine().Analyze(document.text);
-        std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
-        if (m_compile_database)
+        const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
+        cpplsp::ParserOptions parser_options;
+        if (command != nullptr)
         {
-            const auto* command = m_compile_database->Find(PathFromUri(uri));
-            if (command != nullptr)
-            {
-                semantic_diagnostics = cpplsp::SemanticAnalyzer().AnalyzeUnusedLocals(document.text, command);
-            }
+            parser_options.standard = command->standard;
+            parser_options.predefined_macros = command->defines;
+        }
+        const auto parse_tree = cpplsp::ParseTree::Parse(document.text, parser_options);
+        std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
+        if (m_enable_semantic && command != nullptr)
+        {
+            semantic_diagnostics = cpplsp::SemanticAnalyzer().AnalyzeUnusedLocals(document.text, command);
         }
         std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
@@ -314,6 +322,19 @@ class LanguageServer
             message += "},\"severity\":2,\"code\":";
             QuoteJson(diagnostic.code, message);
             message += ",\"source\":\"cpplsp\",\"message\":";
+            QuoteJson(diagnostic.message, message);
+            message += '}';
+        }
+        for (const auto& diagnostic : parse_tree.Diagnostics())
+        {
+            if (!first) message += ',';
+            first = false;
+            const Position start = ToPosition(document.text, diagnostic.offset);
+            message += "{\"range\":{\"start\":";
+            AppendPosition(start, message);
+            message += ",\"end\":";
+            AppendPosition(start, message);
+            message += "},\"severity\":1,\"code\":\"CPPLSP900\",\"source\":\"cpplsp\",\"message\":";
             QuoteJson(diagnostic.message, message);
             message += '}';
         }
@@ -460,6 +481,7 @@ class LanguageServer
 
     std::unordered_map<std::string, Document> m_documents;
     std::optional<cpplsp::CompileDatabase> m_compile_database;
+    bool m_enable_semantic = false;
     std::string m_initialization_error;
 };
 

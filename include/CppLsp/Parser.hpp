@@ -23,6 +23,7 @@ enum class GrammarKind : std::uint8_t
     FunctionDeclaration,
     NamespaceDefinition,
     RecordDefinition,
+    Enumerator,
     CompoundStatement,
     DeclarationStatement,
     ExpressionStatement,

@@ -2,7 +2,7 @@
   "name": "cpplsp-vscode",
   "displayName": "CppLsp - C++ Lint and Format",
   "description": "C++ diagnostics, quick fixes, and formatting powered by CppLsp.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "gilmar-sales",
   "license": "MIT",
   "engines": {
@@ -57,7 +57,7 @@
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
