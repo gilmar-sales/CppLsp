@@ -34,6 +34,24 @@ TEST(ParserSpec, ParsesTranslationUnitDefinitionsAndCompoundStatements)
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 2);
 }
 
+TEST(ParserSpec, SelectsConditionalBranchesUsingPredefinedCompileMacros)
+{
+    constexpr std::string_view source =
+        "#if FEATURE\n"
+        "int enabled() { return 1; }\n"
+        "#else\n"
+        "int disabled() { return 2; }\n"
+        "#endif\n";
+    cpplsp::ParserOptions options;
+    options.standard = cpplsp::CppStandard::Cpp23;
+    options.predefined_macros.emplace("FEATURE", "1");
+    const auto tree = cpplsp::ParseTree::Parse(source, options);
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(tree.Standard(), cpplsp::CppStandard::Cpp23);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
+}
+
 TEST(ParserSpec, RecoversAtSemicolonAndContinuesParsing)
 {
     constexpr std::string_view source = "int f() { int broken return 1; return 2; } int g;";
@@ -70,7 +88,7 @@ TEST(ParserSpec, ParsesParametersAndDeclaratorsWithInitializers)
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ParameterDeclaration), 2);
     EXPECT_GE(Count(tree, cpplsp::GrammarKind::InitDeclarator), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 4);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 5);
     EXPECT_GE(Count(tree, cpplsp::GrammarKind::BinaryExpression), 1);
 }
 
@@ -118,7 +136,7 @@ TEST(ParserSpec, KeepsPreprocessorDirectiveBodiesOpaque)
     const auto tree = cpplsp::ParseTree::Parse(source);
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::PreprocessorDirective), 5);
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 2);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
 }
 
 TEST(ParserSpec, MaintainsValidParentLinksAndContainedTokenRanges)
@@ -161,5 +179,68 @@ TEST(ParserSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)
     EXPECT_TRUE(tree.Diagnostics().empty());
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 3);
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ParameterDeclaration), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 3);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 5);
+}
+
+TEST(ParserSpec, ParsesModuleUnitsConceptsAndRequiresClauses)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "export module sample.core;\n"
+        "import std;\n"
+        "export import :detail;\n"
+        "template<class T> concept HasValue = requires(T value) { value.get(); };\n"
+        "template<class T> void use(T value) requires HasValue<T> { }\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ModuleDeclaration), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ImportDeclaration), 2);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ConceptDefinition), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresExpression), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Requirement), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresClause), 1);
+}
+
+TEST(ParserSpec, ParsesComplexDeclaratorsWithPointersArraysAndQualifiers)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "int (*fp)(int, char);\n"
+        "int values[3][4];\n"
+        "const char* const* argv;\n"
+        "int* const p = nullptr;\n"
+        "int& ref = values[0][0];\n"
+        "std::vector<int>::iterator it;\n"
+        "int Widget::*mp;\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::DeclaredName), 7);
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::PointerOperator), 4);
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::ArraySuffix), 2);
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::FunctionSuffix), 1);
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::NestedNameSpecifier), 1);
+}
+
+TEST(ParserSpec, ParsesFunctionSuffixesWithTrailingReturnNoexceptAndAttributes)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "[[nodiscard]] auto compute(int x) -> int;\n"
+        "void stable() noexcept;\n"
+        "void guarded() noexcept(true);\n"
+        "struct Flags { int x : 3; unsigned y : 4; };\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 3);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::TrailingReturnType), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NoexceptSpecifier), 2);
+    EXPECT_GE(Count(tree, cpplsp::GrammarKind::AttributeSpecifier), 1);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::BitfieldSuffix), 2);
+}
+
+TEST(ParserSpec, ParsesLeadingRequiresClausesBeforeDeclarationsAndDefinitions)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "template<class T> requires HasValue<T> void use(T value);\n"
+        "template<class T> requires Sortable<T> void sort(T& value) { }\n"
+        "template<class T> void check(T value) requires Checkable<T> && Printable<T>;\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::TemplateDeclaration), 3);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresClause), 3);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 2);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
 }

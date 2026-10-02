@@ -9,12 +9,26 @@ namespace cpplsp
 class GrammarParser
 {
   public:
-    explicit GrammarParser(ParseTree& tree) : m_tree(tree)
+    GrammarParser(ParseTree& tree, const PreprocessorResult& preprocessing) : m_tree(tree)
     {
+        for (const auto& diagnostic : preprocessing.diagnostics)
+            tree.m_diagnostics.push_back({ diagnostic.offset, diagnostic.message });
+        std::size_t active_cursor = 0;
+        std::size_t directive_cursor = 0;
         for (std::size_t i = 0; i < tree.m_tokens.size(); ++i)
         {
             const auto& token = tree.m_tokens[i];
-            if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
+            while (active_cursor < preprocessing.active_ranges.size() &&
+                   preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <= token.offset)
+                ++active_cursor;
+            while (directive_cursor < preprocessing.directives.size() &&
+                   preprocessing.directives[directive_cursor].offset + preprocessing.directives[directive_cursor].length <= token.offset)
+                ++directive_cursor;
+            const bool active = active_cursor < preprocessing.active_ranges.size() &&
+                                preprocessing.active_ranges[active_cursor].offset <= token.offset;
+            const bool directive = directive_cursor < preprocessing.directives.size() &&
+                                   preprocessing.directives[directive_cursor].offset <= token.offset;
+            if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                 token.kind != TokenKind::BlockComment)
                 m_sig.push_back(i);
         }
@@ -182,59 +196,893 @@ class GrammarParser
         return end;
     }
 
+    bool IsIdentifierToken(std::size_t sig) const
+    {
+        return sig < m_sig.size() &&
+               m_tree.m_tokens[m_sig[sig]].kind == TokenKind::Identifier;
+    }
+
+    static bool IsBuiltinType(std::string_view text)
+    {
+        return text == "void" || text == "bool" || text == "char" || text == "char8_t" ||
+               text == "char16_t" || text == "char32_t" || text == "wchar_t" || text == "short" ||
+               text == "int" || text == "long" || text == "signed" || text == "unsigned" ||
+               text == "float" || text == "double" || text == "auto" || text == "decltype";
+    }
+
+    static bool IsDeclSpecifierKeyword(std::string_view text)
+    {
+        return IsBuiltinType(text) || text == "const" || text == "volatile" || text == "static" ||
+               text == "extern" || text == "inline" || text == "constexpr" || text == "consteval" ||
+               text == "constinit" || text == "virtual" || text == "friend" || text == "typedef" ||
+               text == "thread_local" || text == "mutable" || text == "explicit" || text == "typename" ||
+               text == "struct" || text == "class" || text == "union" || text == "enum";
+    }
+
+    static bool IsDeclarationStartKeyword(std::string_view text)
+    {
+        return IsDeclSpecifierKeyword(text) || text == "::" || text == "requires";
+    }
+
+    bool IsAttributeStart(std::size_t i, std::size_t end) const
+    {
+        return i + 1 < end && Is(i, "[") && Is(i + 1, "[");
+    }
+
+    std::size_t SkipAttributes(std::size_t i, std::size_t end, std::size_t parent)
+    {
+        while (IsAttributeStart(i, end))
+        {
+            const auto outer_close = m_match[i];
+            if (outer_close == Invalid || outer_close >= end) break;
+            Add(GrammarKind::AttributeSpecifier, i, outer_close + 1, parent);
+            i = outer_close + 1;
+        }
+        return i;
+    }
+
+    bool IsRequiresExpressionAt(std::size_t pos, std::size_t end) const
+    {
+        if (!Is(pos, "requires") || pos >= end) return false;
+        auto next = pos + 1;
+        if (next < end && Is(next, "(") && m_match[next] != Invalid && m_match[next] < end)
+        {
+            const auto after = m_match[next] + 1;
+            if (after < end && Is(after, "{")) return true;
+            if (after == end) return true;
+            return false;
+        }
+        if (next < end && Is(next, "{")) return true;
+        return false;
+    }
+
+    std::size_t FindTopLevelRequires(std::size_t begin, std::size_t end) const
+    {
+        std::size_t angle_depth = 0;
+        for (auto i = begin; i < end;)
+        {
+            if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+            {
+                i = m_match[i] + 1;
+                continue;
+            }
+            if (Is(i, "<") && i > begin &&
+                (IsIdentifierToken(i - 1) || Is(i - 1, ">") || Is(i - 1, ">>")))
+            {
+                const auto close = FindTemplateClose(i, end);
+                if (close != Invalid)
+                {
+                    ++angle_depth;
+                    ++i;
+                    continue;
+                }
+            }
+            if (Is(i, ">") && angle_depth != 0) { --angle_depth; ++i; continue; }
+            if (Is(i, ">>") && angle_depth != 0)
+            {
+                angle_depth = angle_depth > 1 ? angle_depth - 2 : 0;
+                ++i;
+                continue;
+            }
+            if (angle_depth == 0 && Is(i, "requires") && !IsRequiresExpressionAt(i, end)) return i;
+            ++i;
+        }
+        return Invalid;
+    }
+
+    // Parse `::`? (identifier [<...>] `::`)* and return position of unqualified-id.
+    // Emits NestedNameSpecifier nodes for each `prefix ::` segment.
+    std::size_t ParseNestedNamePrefix(std::size_t begin, std::size_t end, std::size_t parent)
+    {
+        auto i = begin;
+        if (i < end && Is(i, "::")) ++i;
+        while (i < end)
+        {
+            auto head = i;
+            if (Is(head, "template")) ++head;
+            if (head >= end || !IsIdentifierToken(head)) break;
+            auto after_name = head + 1;
+            if (after_name < end && Is(after_name, "<"))
+            {
+                const auto close = FindTemplateClose(after_name, end);
+                if (close == Invalid) break;
+                after_name = close + 1;
+            }
+            if (after_name + 1 < end && Is(after_name, ":") && Is(after_name + 1, ":")) break;
+            if (after_name < end && Is(after_name, "::"))
+            {
+                Add(GrammarKind::NestedNameSpecifier, i, after_name + 1, parent);
+                i = after_name + 1;
+                continue;
+            }
+            break;
+        }
+        return i;
+    }
+
+    std::size_t ParseQualifiedName(std::size_t begin, std::size_t end, std::size_t parent,
+                                   std::size_t& name_pos)
+    {
+        name_pos = Invalid;
+        auto i = ParseNestedNamePrefix(begin, end, parent);
+        if (i < end && Is(i, "::")) ++i;
+        if (i < end && Is(i, "template")) ++i;
+        if (i < end && Is(i, "~"))
+        {
+            if (i + 1 < end && IsIdentifierToken(i + 1))
+            {
+                name_pos = i + 1;
+                return i + 2;
+            }
+            return i + 1;
+        }
+        if (i < end && Is(i, "operator"))
+        {
+            auto op = i + 1;
+            if (op < end && Is(op, "(") && m_match[op] != Invalid) op = m_match[op] + 1;
+            else if (op < end && Is(op, "[") && m_match[op] != Invalid) op = m_match[op] + 1;
+            else ++op;
+            if (op < end && Is(op, "<"))
+            {
+                const auto close = FindTemplateClose(op, end);
+                if (close != Invalid) op = close + 1;
+            }
+            name_pos = i;
+            return op <= end ? op : end;
+        }
+        if (i < end && IsIdentifierToken(i))
+        {
+            name_pos = i;
+            auto after = i + 1;
+            if (after < end && Is(after, "<"))
+            {
+                const auto close = FindTemplateClose(after, end);
+                if (close != Invalid) after = close + 1;
+            }
+            return after;
+        }
+        return i;
+    }
+
+    // Consume decl-specifier-seq starting at begin. Returns position after specifiers.
+    // Creates one TypeSpecifier node plus NestedNameSpecifier / AttributeSpecifier children.
+    std::size_t ParseDeclSpecifiers(std::size_t begin, std::size_t end, std::size_t parent)
+    {
+        auto i = SkipAttributes(begin, end, parent);
+        const auto spec_start = i;
+        bool saw_type = false;
+        while (i < end)
+        {
+            i = SkipAttributes(i, end, parent);
+            if (i >= end) break;
+            const auto text = Text(i);
+            if (text == "decltype" && i + 1 < end && Is(i + 1, "(") && m_match[i + 1] != Invalid)
+            {
+                i = m_match[i + 1] + 1;
+                saw_type = true;
+                continue;
+            }
+            if (text == "struct" || text == "class" || text == "union" || text == "enum")
+            {
+                ++i;
+                i = SkipAttributes(i, end, parent);
+                std::size_t dummy = Invalid;
+                i = ParseQualifiedName(i, end, parent, dummy);
+                saw_type = true;
+                continue;
+            }
+            if (IsDeclSpecifierKeyword(text))
+            {
+                // `signed long`, `unsigned long long`, `long double` etc. all stay in specifiers.
+                ++i;
+                saw_type |= IsBuiltinType(text) || text == "struct" || text == "class" ||
+                            text == "union" || text == "enum" || text == "typename" || text == "auto";
+                // A user type name directly after `typename` belongs to the specifiers.
+                if ((text == "typename" || text == "const" || text == "volatile") && i < end)
+                {
+                    auto probe = ParseNestedNamePrefix(i, end, parent);
+                    if (probe < end && IsIdentifierToken(probe))
+                    {
+                        auto after = probe + 1;
+                        if (after < end && Is(after, "<"))
+                        {
+                            const auto close = FindTemplateClose(after, end);
+                            if (close != Invalid) after = close + 1;
+                        }
+                        // Only absorb it as the core type if nothing follows that looks like
+                        // a second declarator name (e.g. `Widget input`, not `int` alone).
+                        auto look = after;
+                        while (look < end && (Is(look, "*") || Is(look, "&") || Is(look, "&&"))) ++look;
+                        if (look < end && IsIdentifierToken(look))
+                        {
+                            i = after;
+                            saw_type = true;
+                        }
+                    }
+                }
+                continue;
+            }
+            // User-defined type: nested-name-specifier? identifier [<...>] (but not the declarator name).
+            // Only absorb a type when none has been seen yet; otherwise the identifier
+            // is the declarator name (e.g. `left` in `int left`).
+            if ((IsIdentifierToken(i) || Is(i, "::")) && !saw_type)
+            {
+                const auto save = i;
+                std::size_t dummy = Invalid;
+                const auto after = ParseQualifiedName(i, end, parent, dummy);
+                if (after == save) break;
+                // If what follows looks like a declarator name/operator, this was the type.
+                auto look = after;
+                while (look < end && (Is(look, "*") || Is(look, "&") || Is(look, "&&"))) ++look;
+                if (look < end && (IsIdentifierToken(look) || Is(look, "(") || Is(look, "~") ||
+                                   Is(look, "operator") || Is(look, "::")))
+                {
+                    i = after;
+                    saw_type = true;
+                    break;
+                }
+                // `A f` where f is missing (e.g. end of parameter) still counts as type,
+                // but a lone `name{...}` / `name[...]` is a declarator with init/suffix.
+                if (after == end || (after < end && (Is(after, ",") || Is(after, "=") || Is(after, ";") ||
+                                                     Is(after, ")") || Is(after, "requires"))))
+                {
+                    i = after;
+                    saw_type = true;
+                    break;
+                }
+                break;
+            }
+            break;
+        }
+        if (saw_type && spec_start < i) Add(GrammarKind::TypeSpecifier, spec_start, i, parent);
+        return saw_type ? i : begin;
+    }
+
+    bool LooksLikeDeclarationStart(std::size_t pos, std::size_t end) const
+    {
+        if (pos >= end) return false;
+        const auto text = Text(pos);
+        if (text == "::" || text == "template") return true;
+        if (IsDeclSpecifierKeyword(text)) return true;
+        if (!IsIdentifierToken(pos)) return false;
+        auto after = pos + 1;
+        if (after < end && Is(after, "<"))
+        {
+            const auto close = FindTemplateClose(after, end);
+            if (close == Invalid) return false;
+            after = close + 1;
+        }
+        if (after < end && Is(after, "::")) return true;
+        // `Name * x`, `Name & x`, `Name x`
+        auto look = after;
+        while (look < end && (Is(look, "*") || Is(look, "&") || Is(look, "&&"))) ++look;
+        if (look < end && IsIdentifierToken(look)) return true;
+        if (look < end && Is(look, "(")) return true;
+        return false;
+    }
+
+    // Extent of one constraint expression starting at pos (no tree mutation).
+    // Mirrors the expression grammar's primary/postfix/binary structure so a
+    // leading `requires Constraint decl` splits after the constraint, not inside it.
+    std::size_t ConstraintPrimaryExtent(std::size_t pos, std::size_t end) const
+    {
+        if (pos >= end) return pos;
+        if (Is(pos, "(") && m_match[pos] != Invalid && m_match[pos] < end) return m_match[pos] + 1;
+        if (Is(pos, "[") && m_match[pos] != Invalid && m_match[pos] < end) return m_match[pos] + 1;
+        if (Is(pos, "{") && m_match[pos] != Invalid && m_match[pos] < end) return m_match[pos] + 1;
+        if (Is(pos, "requires"))
+        {
+            auto body = pos + 1;
+            if (body < end && Is(body, "(") && m_match[body] != Invalid) body = m_match[body] + 1;
+            while (body < end && !Is(body, "{") && !Is(body, ";")) ++body;
+            if (body < end && Is(body, "{") && m_match[body] != Invalid) return m_match[body] + 1;
+            return body;
+        }
+        auto i = pos;
+        if (i < end && Is(i, "::")) ++i;
+        if (i < end && Is(i, "template")) ++i;
+        if (i < end && Is(i, "~"))
+        {
+            if (i + 1 < end && IsIdentifierToken(i + 1)) return i + 2;
+            return i + 1;
+        }
+        if (i < end && Is(i, "operator"))
+        {
+            auto op = i + 1;
+            if (op < end && (Is(op, "(") || Is(op, "[")) && m_match[op] != Invalid) op = m_match[op] + 1;
+            else ++op;
+            return op <= end ? op : end;
+        }
+        if (i < end && (IsIdentifierToken(i) || Is(i, "decltype") || Is(i, "sizeof") || Is(i, "alignof") ||
+                         Is(i, "noexcept") || Is(i, "true") || Is(i, "false") || Is(i, "nullptr") ||
+                         m_tree.m_tokens[m_sig[i]].kind == TokenKind::Number ||
+                         m_tree.m_tokens[m_sig[i]].kind == TokenKind::StringLiteral ||
+                         m_tree.m_tokens[m_sig[i]].kind == TokenKind::CharacterLiteral ||
+                         m_tree.m_tokens[m_sig[i]].kind == TokenKind::RawStringLiteral))
+        {
+            ++i;
+            if (i < end && Is(i, "<"))
+            {
+                const auto close = FindTemplateClose(i - 1, end);
+                // Only treat `<...>` as template args when it closes; otherwise it is a
+                // relational operator terminating the constraint primary.
+                if (close != Invalid) i = close + 1;
+            }
+            while (i + 1 < end && Is(i, "::") && (IsIdentifierToken(i + 1) || Is(i + 1, "template")))
+            {
+                ++i;
+                if (Is(i, "template")) ++i;
+                if (i < end && IsIdentifierToken(i))
+                {
+                    ++i;
+                    if (i < end && Is(i, "<"))
+                    {
+                        const auto close = FindTemplateClose(i - 1, end);
+                        if (close == Invalid) break;
+                        i = close + 1;
+                    }
+                }
+            }
+            return i;
+        }
+        return pos;
+    }
+
+    std::size_t ConstraintExtent(std::size_t pos, std::size_t end) const
+    {
+        auto i = ConstraintPrimaryExtent(pos, end);
+        if (i == pos) return pos;
+        while (i < end)
+        {
+            // Postfix continuation: calls, subscripts, member access, template-ids.
+            if ((Is(i, "(") || Is(i, "[")) && m_match[i] != Invalid && m_match[i] < end)
+            {
+                i = m_match[i] + 1;
+                continue;
+            }
+            if (Is(i, ".") || Is(i, "->") || Is(i, "::"))
+            {
+                ++i;
+                if (i < end && (IsIdentifierToken(i) || Is(i, "template"))) ++i;
+                continue;
+            }
+            if ((Is(i, "++") || Is(i, "--")) && i > pos)
+            {
+                ++i;
+                continue;
+            }
+            if (Is(i, "<") && i > pos && (IsIdentifierToken(i - 1) || Is(i - 1, ">") || Is(i - 1, ">>")))
+            {
+                const auto close = FindTemplateClose(i - 1, end);
+                if (close != Invalid && close + 1 < end &&
+                    (Is(close + 1, "(") || Is(close + 1, "{") || Is(close + 1, "::") ||
+                     Is(close + 1, ",") || Is(close + 1, ">") || Is(close + 1, ">>") ||
+                     IsIdentifierToken(close + 1)))
+                {
+                    i = close + 1;
+                    continue;
+                }
+            }
+            // Ternary.
+            if (Is(i, "?"))
+            {
+                ++i;
+                const auto mid = ConstraintExtent(i, end);
+                i = mid;
+                if (i < end && Is(i, ":")) ++i;
+                const auto rhs = ConstraintExtent(i, end);
+                i = rhs;
+                continue;
+            }
+            static constexpr std::string_view binary_ops[] = { "||", "&&", "|", "^", "&", "==", "!=",
+                "<=", ">=", "<=>", "<<", ">>", "<", ">", "+", "-", "*", "/", "%" };
+            bool is_binary = false;
+            for (const auto op : binary_ops)
+            {
+                if (!Is(i, op)) continue;
+                if ((op == "*" || op == "&") && i + 1 < end && IsIdentifierToken(i + 1))
+                {
+                    // `*` / `&` followed by a name at top level more likely starts a
+                    // declarator (`void use`) than continues the constraint.
+                    // Only treat as binary when the left side cannot end a constraint
+                    // primary... handled below by requiring a valid right-hand primary.
+                }
+                const auto rhs = ConstraintPrimaryExtent(i + 1, end);
+                if (rhs == i + 1) { is_binary = false; break; }
+                // For `*`/`&`, demand that the right side continues as an expression
+                // (operator, `(`, `,`, `;`, end) rather than a lone declarator name
+                // followed by `(` params or `;`.
+                if ((op == "*" || op == "&") && rhs < end && IsIdentifierToken(rhs - 1))
+                {
+                    auto look = rhs;
+                    while (look < end && (Is(look, "*") || Is(look, "&") || Is(look, "&&"))) ++look;
+                    if (look < end && (Is(look, "(") || Is(look, ";") || Is(look, ",") || Is(look, "=")))
+                    {
+                        // Ambiguous pointer-vs-binary: prefer declaration split unless the
+                        // `(`/`;` clearly belongs to the constraint (e.g. call args).
+                        // Calls were already consumed as postfix groups above, so stop here.
+                        is_binary = false;
+                        break;
+                    }
+                }
+                i = rhs;
+                is_binary = true;
+                break;
+            }
+            if (is_binary)
+            {
+                // Allow chained postfix on the right-hand side result.
+                continue;
+            }
+            break;
+        }
+        return i;
+    }
+
+    // For `requires Constraint decl`, find where the constraint ends and the declaration begins.
+    // Parses the constraint extent without mutating the tree, then verifies the
+    // remainder looks like a declaration.
+    std::size_t FindLeadingRequiresSplit(std::size_t req, std::size_t end) const
+    {
+        if (req == Invalid || req >= end) return Invalid;
+        const auto extent = ConstraintExtent(req + 1, end);
+        if (extent > req + 1 && extent < end && LooksLikeDeclarationStart(extent, end)) return extent;
+        return Invalid;
+    }
+
     std::size_t FindDeclaredName(std::size_t begin, std::size_t end) const
     {
         std::size_t candidate = Invalid;
         for (auto i = begin; i < end;)
         {
-            if ((Is(i, "[") || Is(i, "{") || Is(i, "(")) && m_match[i] != Invalid && m_match[i] > i)
+            if (Is(i, "<") && i > begin && IsIdentifierToken(i - 1))
+            {
+                const auto close = FindTemplateClose(i, end);
+                if (close != Invalid) { i = close + 1; continue; }
+            }
+            if (Is(i, "(") && m_match[i] != Invalid && m_match[i] > i)
+            {
+                bool pointer_group = false;
+                for (auto j = i + 1; j < m_match[i]; ++j)
+                    pointer_group |= Is(j, "*") || Is(j, "&") || Is(j, "&&");
+                if (pointer_group)
+                    for (auto j = i + 1; j < m_match[i]; ++j)
+                        if (IsIdentifierToken(j) && m_match[j] == Invalid) candidate = j;
+                i = m_match[i] + 1;
+                continue;
+            }
+            if ((Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
             {
                 i = m_match[i] + 1;
                 continue;
             }
-            if (m_tree.m_tokens[m_sig[i]].kind == TokenKind::Identifier) candidate = i;
+            if (IsIdentifierToken(i)) candidate = i;
             ++i;
         }
         return candidate;
     }
 
+    void ParseRequiresConstraint(std::size_t req, std::size_t clause_end, std::size_t parent)
+    {
+        if (req == Invalid || req + 1 >= clause_end) return;
+        const auto clause = Add(GrammarKind::RequiresClause, req, clause_end, parent);
+        ParseExpression(req + 1, clause_end, clause);
+    }
+
+    std::size_t FindBitfieldColon(std::size_t begin, std::size_t end) const
+    {
+        std::size_t angle_depth = 0;
+        for (auto i = begin; i < end; ++i)
+        {
+            if ((Is(i, "(") || Is(i, "[") || Is(i, "{")) && m_match[i] != Invalid && m_match[i] > i)
+            {
+                i = m_match[i];
+                continue;
+            }
+            if (Is(i, "<") && i > begin && IsIdentifierToken(i - 1))
+            {
+                const auto close = FindTemplateClose(i, end);
+                if (close != Invalid) { ++angle_depth; continue; }
+            }
+            if ((Is(i, ">") || Is(i, ">>")) && angle_depth != 0) continue;
+            if (Is(i, ":") && !(i + 1 < end && Is(i + 1, ":"))) return i;
+            if (Is(i, ";") || Is(i, ",") || Is(i, "=")) return Invalid;
+        }
+        return Invalid;
+    }
+
+    // Parse `( params ) [cv/ref/noexcept/attrs] [-> type] [requires ...]` at pos==open.
+    // Returns position after the suffix. Creates FunctionSuffix + children.
+    std::size_t ParseFunctionSuffix(std::size_t open, std::size_t end, std::size_t declarator_node)
+    {
+        if (open >= end || !Is(open, "(") || m_match[open] == Invalid) return open;
+        const auto close = m_match[open];
+        if (close >= end) return open;
+        const auto suffix = Add(GrammarKind::FunctionSuffix, open, close + 1, declarator_node);
+        auto part = open + 1;
+        if (part == close && open > 0)
+        {
+            // `()` empty parameter list: no ParameterDeclaration children.
+        }
+        while (part < close)
+        {
+            const auto comma = FindComma(part, close);
+            const bool ellipsis = comma == part + 1 && Is(part, "...");
+            if (!ellipsis && comma > part)
+            {
+                // Skip `void` alone in `()` / `(void)`.
+                const bool lone_void = comma == close && part + 1 == comma && Is(part, "void");
+                if (!lone_void || close - (open + 1) != 1)
+                {
+                    if (!(lone_void && part == open + 1))
+                    {
+                        const auto parameter = Add(GrammarKind::ParameterDeclaration, part, comma, suffix);
+                        AddTypeAndDeclarator(part, comma, parameter);
+                    }
+                }
+            }
+            if (comma == close) break;
+            part = comma + 1;
+        }
+        auto tail = close + 1;
+        tail = SkipAttributes(tail, end, suffix);
+        while (tail < end && (Is(tail, "const") || Is(tail, "volatile") || Is(tail, "&") || Is(tail, "&&") ||
+                              Is(tail, "override") || Is(tail, "final")))
+            ++tail;
+        if (tail < end && Is(tail, "noexcept"))
+        {
+            auto spec_end = tail + 1;
+            if (spec_end < end && Is(spec_end, "(") && m_match[spec_end] != Invalid) spec_end = m_match[spec_end] + 1;
+            Add(GrammarKind::NoexceptSpecifier, tail, spec_end, suffix);
+            tail = spec_end;
+            tail = SkipAttributes(tail, end, suffix);
+        }
+        else if (tail < end && Is(tail, "throw") && tail + 1 < end && Is(tail + 1, "(") &&
+                 m_match[tail + 1] != Invalid)
+        {
+            const auto spec_end = m_match[tail + 1] + 1;
+            Add(GrammarKind::NoexceptSpecifier, tail, spec_end, suffix);
+            tail = spec_end;
+        }
+        if (tail < end && Is(tail, "->"))
+        {
+            auto type_end = tail + 1;
+            while (type_end < end && (Is(type_end, "*") || Is(type_end, "&") || Is(type_end, "&&") ||
+                                     Is(type_end, "const") || Is(type_end, "volatile")))
+                ++type_end;
+            std::size_t dummy = Invalid;
+            // Reuse qualified-name scanning for the trailing type core.
+            const auto name_start = type_end;
+            type_end = ParseQualifiedName(type_end, end, suffix, dummy);
+            if (type_end == name_start) ++type_end;
+            Add(GrammarKind::TrailingReturnType, tail, type_end, suffix);
+            tail = type_end;
+        }
+        // Trailing requires-clause belongs to the suffix when present here.
+        const auto req = FindTopLevelRequires(tail, end);
+        if (req != Invalid)
+        {
+            ParseRequiresConstraint(req, end, suffix);
+            SetNodeRange(suffix, open, end);
+            return end;
+        }
+        SetNodeRange(suffix, open, tail);
+        return tail;
+    }
+
+    // Parse one declarator (no top-level comma) with full pointer / core / suffix grammar.
+    // Creates Declarator node with DeclaredName, PointerOperator, ArraySuffix, FunctionSuffix, etc.
+    void ParseSingleDeclarator(std::size_t begin, std::size_t end, std::size_t parent)
+    {
+        if (begin >= end) return;
+        const auto declarator = Add(GrammarKind::Declarator, begin, end, parent);
+        auto i = SkipAttributes(begin, end, declarator);
+        // Leading pointer operators: `*`, `&`, `&&` with cv-qualifiers and attributes.
+        while (i < end && (Is(i, "*") || Is(i, "&") || Is(i, "&&")))
+        {
+            const auto start = i++;
+            while (i < end && (Is(i, "const") || Is(i, "volatile"))) ++i;
+            i = SkipAttributes(i, end, declarator);
+            Add(GrammarKind::PointerOperator, start, i, declarator);
+            i = SkipAttributes(i, end, declarator);
+        }
+        std::size_t name_pos = Invalid;
+        std::size_t core_end = i;
+        if (i < end && Is(i, "(") && m_match[i] != Invalid && m_match[i] < end)
+        {
+            // Parenthesized declarator: `(*fp)`, `(&ref)`, `(name)` for function pointers/references.
+            const auto inner_open = i;
+            const auto inner_close = m_match[i];
+            // Emit inner pointer operators and name recursively.
+            ParseSingleDeclarator(inner_open + 1, inner_close, declarator);
+            core_end = inner_close + 1;
+            // The outer Declarator keeps the full range; inner Declarator holds the name.
+        }
+        else
+        {
+            core_end = ParseQualifiedName(i, end, declarator, name_pos);
+            if (name_pos == Invalid && core_end < end &&
+                (Is(core_end, "*") || Is(core_end, "&") || Is(core_end, "&&")))
+            {
+                // Pointer-to-member `Nested::*name` / `Nested::&name`: the nested-name
+                // prefix was emitted above; consume the member pointer operator here.
+                const auto start = core_end++;
+                while (core_end < end && (Is(core_end, "const") || Is(core_end, "volatile"))) ++core_end;
+                core_end = SkipAttributes(core_end, end, declarator);
+                Add(GrammarKind::PointerOperator, start, core_end, declarator);
+                core_end = ParseQualifiedName(core_end, end, declarator, name_pos);
+            }
+            if (name_pos != Invalid) Add(GrammarKind::DeclaredName, name_pos, name_pos + 1, declarator);
+            else if (core_end == i)
+            {
+                // Abstract declarator (e.g. lone `void` parameter or `...`): nothing more to parse.
+                SetNodeRange(declarator, begin, core_end);
+                return;
+            }
+        }
+        auto tail = core_end;
+        // Suffix loop: arrays, function parameter lists, trailing return, noexcept, attributes, bitfield.
+        while (tail < end)
+        {
+            tail = SkipAttributes(tail, end, declarator);
+            if (tail >= end) break;
+            if (Is(tail, "[") && m_match[tail] != Invalid && m_match[tail] < end)
+            {
+                const auto close = m_match[tail];
+                const auto suffix = Add(GrammarKind::ArraySuffix, tail, close + 1, declarator);
+                if (close > tail + 1) ParseExpression(tail + 1, close, suffix);
+                tail = close + 1;
+                continue;
+            }
+            if (Is(tail, "(") && m_match[tail] != Invalid && m_match[tail] < end)
+            {
+                tail = ParseFunctionSuffix(tail, end, declarator);
+                continue;
+            }
+            if (Is(tail, "->"))
+            {
+                auto type_end = tail + 1;
+                std::size_t dummy = Invalid;
+                type_end = ParseQualifiedName(type_end, end, declarator, dummy);
+                Add(GrammarKind::TrailingReturnType, tail, type_end, declarator);
+                tail = type_end;
+                continue;
+            }
+            if (Is(tail, "noexcept") ||
+                (Is(tail, "throw") && tail + 1 < end && Is(tail + 1, "(")))
+            {
+                auto spec_end = tail + 1;
+                if (spec_end < end && Is(spec_end, "(") && m_match[spec_end] != Invalid)
+                    spec_end = m_match[spec_end] + 1;
+                Add(GrammarKind::NoexceptSpecifier, tail, spec_end, declarator);
+                tail = spec_end;
+                continue;
+            }
+            break;
+        }
+        // Bitfield `: width` (member declarations only, but harmless to recognize generally).
+        const auto colon = FindBitfieldColon(tail, end);
+        if (colon != Invalid && colon >= tail)
+        {
+            const auto suffix = Add(GrammarKind::BitfieldSuffix, colon, end, declarator);
+            ParseExpression(colon + 1, end, suffix);
+            tail = end;
+        }
+        SetNodeRange(declarator, begin, tail);
+    }
+
     void AddTypeAndDeclarator(std::size_t begin, std::size_t end, std::size_t parent, bool include_type = true)
     {
-        const auto initializer = TopLevelAssignment(begin, end);
-        const auto declarator_end = initializer < end ? initializer : end;
-        const auto name = FindDeclaredName(begin, declarator_end);
-        if (name == Invalid)
+        if (begin >= end)
         {
-            if (include_type && begin < end) Add(GrammarKind::TypeSpecifier, begin, end, parent);
+            if (include_type) Add(GrammarKind::TypeSpecifier, begin, end, parent);
             return;
         }
-        if (include_type && begin < name) Add(GrammarKind::TypeSpecifier, begin, name, parent);
-        const auto declarator = Add(GrammarKind::Declarator, name, declarator_end, parent);
-        Add(GrammarKind::DeclaredName, name, name + 1, declarator);
-        if (initializer < end && Is(initializer, "="))
-            ParseExpression(initializer + 1, end, declarator);
-        else if (initializer < end && Is(initializer, "{"))
+        // Ellipsis parameter `...` has no type or name.
+        if (end == begin + 1 && Is(begin, "...")) return;
+        // Trailing requires-clause: split `decl requires Constraint` at top level.
+        auto declarator_end = end;
+        std::size_t trailing_req = Invalid;
+        const auto req_pos = FindTopLevelRequires(begin, end);
+        if (req_pos != Invalid && !IsRequiresExpressionAt(req_pos, end))
         {
-            const auto close = m_match[initializer];
-            if (close != Invalid && close < end) ParseExpression(initializer + 1, close, declarator);
+            // Distinguish initializer `= requires...` (constraint as initializer) from a
+            // trailing clause: if `=` precedes requires at top level, it is an initializer.
+            bool has_equals_before = false;
+            for (auto k = begin; k < req_pos;)
+            {
+                if ((Is(k, "(") || Is(k, "[") || Is(k, "{")) && m_match[k] != Invalid && m_match[k] > k)
+                {
+                    k = m_match[k] + 1;
+                    continue;
+                }
+                if (Is(k, "=")) { has_equals_before = true; break; }
+                ++k;
+            }
+            if (!has_equals_before)
+            {
+                trailing_req = req_pos;
+                declarator_end = req_pos;
+            }
+        }
+        // Initializer split: top-level `=` or braced/paren init that is not a function suffix.
+        auto init_pos = TopLevelAssignment(begin, declarator_end);
+        // A top-level `(` group here is ambiguous between direct-initialization and a
+        // function declarator suffix; ParseSingleDeclarator disambiguates via FunctionSuffix.
+        // Only treat `(` as initializer when no FunctionSuffix will claim it: check whether
+        // the range before `(` already contains a declarator name.
+        if (init_pos >= declarator_end)
+        {
+            for (auto k = begin; k < declarator_end;)
+            {
+                if ((Is(k, "[") || Is(k, "{")) && m_match[k] != Invalid && m_match[k] > k)
+                {
+                    k = m_match[k] + 1;
+                    continue;
+                }
+                if (Is(k, "(") && m_match[k] != Invalid && m_match[k] > k)
+                {
+                    init_pos = k;
+                    break;
+                }
+                ++k;
+            }
+            // If the paren group parses as a function suffix, it is not an initializer.
+            if (init_pos < declarator_end && Is(init_pos, "("))
+            {
+                const auto maybe_name = FindDeclaredName(begin, init_pos);
+                if (maybe_name != Invalid) init_pos = declarator_end;
+            }
+            else init_pos = declarator_end;
+        }
+        auto code_end = init_pos < declarator_end ? init_pos : declarator_end;
+        // Bitfield width is part of the declarator, not the initializer.
+        const auto colon = FindBitfieldColon(begin, code_end);
+        if (colon != Invalid) code_end = end >= colon ? code_end : code_end;
+        // Shared vs. per-declarator type handling: when include_type is false the caller
+        // already emitted the shared TypeSpecifier; otherwise parse specifiers here.
+        std::size_t spec_end = begin;
+        if (include_type)
+        {
+            // Parse specifiers over the full declarator range so a trailing lone
+            // identifier is not mistaken for a type when an initializer follows
+            // (e.g. `second` in `second{right}`); clamp back to code_end.
+            spec_end = ParseDeclSpecifiers(begin, declarator_end, parent);
+            if (spec_end > code_end) spec_end = code_end;
+            if (spec_end == begin)
+            {
+                // No type specifiers (e.g. constructor `Widget();`): parse bare declarator.
+                spec_end = begin;
+            }
+        }
+        else
+        {
+            // Skip the shared type prefix already emitted by AddDeclarationDetails.
+            // Re-parse to find its extent without emitting a duplicate TypeSpecifier.
+            auto probe = begin;
+            // Temporarily parse with emission suppressed by using a scratch parent?
+            // Instead compute extent via a non-emitting scan: reuse ParseDeclSpecifiers logic
+            // by parsing into the InitDeclarator then removing? Simpler: find first name.
+            const auto first_name = FindDeclaredName(begin, code_end);
+            if (first_name != Invalid)
+            {
+                // Walk back over pointer operators to find declarator start.
+                spec_end = first_name;
+                // The shared TypeSpecifier ends before pointer operators; keep them in declarator.
+                // Find where pointer run starts by scanning from begin for `*`/`&` after type.
+                // Heuristic: spec_end for suffix parsing is begin of pointer run or name.
+                auto scan = begin;
+                // Consume attributes + decl-specifier keywords + user type to locate split.
+                // Reuse ParseDeclSpecifiers extent by probing with a temporary node then rolling back.
+                const auto nodes_before = m_tree.m_nodes.size();
+                const auto probe_end = ParseDeclSpecifiers(begin, code_end, parent);
+                // Remove the duplicate TypeSpecifier + children emitted by the probe.
+                while (m_tree.m_nodes.size() > nodes_before) m_tree.m_nodes.pop_back();
+                spec_end = probe_end;
+                if (spec_end <= begin) spec_end = begin;
+                (void)scan;
+            }
+            else spec_end = begin;
+        }
+        if (spec_end < code_end) ParseSingleDeclarator(spec_end, code_end, parent);
+        else if (spec_end == begin && code_end > begin)
+        {
+            // Fallback: retain old name-only behavior so counts never regress.
+            const auto name = FindDeclaredName(begin, code_end);
+            if (name != Invalid)
+            {
+                const auto declarator = Add(GrammarKind::Declarator, name, code_end, parent);
+                Add(GrammarKind::DeclaredName, name, name + 1, declarator);
+            }
+        }
+        if (trailing_req != Invalid)
+        {
+            ParseRequiresConstraint(trailing_req, end, parent);
+            return;
+        }
+        if (init_pos < end && Is(init_pos, "="))
+            ParseExpression(init_pos + 1, declarator_end == end ? end : declarator_end, parent);
+        else if (init_pos < end && Is(init_pos, "{") && m_match[init_pos] != Invalid)
+            ParseExpression(init_pos + 1, m_match[init_pos], parent);
+        else if (init_pos < end && Is(init_pos, "(") && m_match[init_pos] != Invalid)
+        {
+            // Direct-list initialization `Type name(args)`: parse args as expressions.
+            const auto close = m_match[init_pos];
+            auto arg = init_pos + 1;
+            while (arg < close)
+            {
+                const auto next = FindComma(arg, close);
+                if (arg < next) ParseExpression(arg, next, parent);
+                if (next == close) break;
+                arg = next + 1;
+            }
         }
     }
 
     void AddDeclarationDetails(std::size_t begin, std::size_t end, std::size_t parent, bool parameter = false)
     {
+        if (begin >= end) return;
+        // Leading requires-clause: `requires Constraint decl` (constrained template / function).
+        auto body_start = begin;
+        if (Is(body_start, "requires") && !IsRequiresExpressionAt(body_start, end))
+        {
+            const auto split = FindLeadingRequiresSplit(body_start, end);
+            if (split != Invalid && split > body_start)
+            {
+                ParseRequiresConstraint(body_start, split, parent);
+                body_start = split;
+            }
+        }
         // C++ declarations share one specifier sequence across comma-separated
         // declarators; keep that prefix explicit instead of duplicating it.
-        const auto first_comma = FindComma(begin, end);
-        const auto first_initializer = TopLevelAssignment(begin, first_comma);
-        const auto shared_name = FindDeclaredName(begin, first_initializer < first_comma ? first_initializer : first_comma);
-        if (shared_name != Invalid && begin < shared_name)
-            Add(GrammarKind::TypeSpecifier, begin, shared_name, parent);
-        auto part = begin;
+        const auto first_comma = FindComma(body_start, end);
+        const auto nodes_before = m_tree.m_nodes.size();
+        const auto spec_end = ParseDeclSpecifiers(body_start, first_comma, parent);
+        const bool has_shared_type = spec_end > body_start;
+        if (!has_shared_type)
+        {
+            while (m_tree.m_nodes.size() > nodes_before) m_tree.m_nodes.pop_back();
+        }
+        auto part = body_start;
         while (part < end)
         {
             const auto comma = FindComma(part, end);
             const auto declarator = Add(GrammarKind::InitDeclarator, part, comma, parent);
-            AddTypeAndDeclarator(part, comma, declarator, false);
+            if (part == body_start && has_shared_type)
+            {
+                // First declarator reuses the shared TypeSpecifier node above.
+                const auto code_begin = spec_end;
+                const auto init = TopLevelAssignment(code_begin, comma);
+                const auto code_end = init < comma ? init : comma;
+                if (code_begin < code_end) ParseSingleDeclarator(code_begin, code_end, declarator);
+                const auto req = FindTopLevelRequires(code_begin, comma);
+                if (req != Invalid && req >= code_begin && !IsRequiresExpressionAt(req, comma))
+                    ParseRequiresConstraint(req, comma, declarator);
+                if (init < comma && Is(init, "=")) ParseExpression(init + 1, comma, declarator);
+                else if (init < comma && Is(init, "{") && m_match[init] != Invalid)
+                    ParseExpression(init + 1, m_match[init], declarator);
+            }
+            else AddTypeAndDeclarator(part, comma, declarator, true);
             if (comma == end) break;
             part = comma + 1;
         }
@@ -251,6 +1099,9 @@ class GrammarParser
         if (open == Invalid) return;
         const auto close = m_match[open];
         auto part = open + 1;
+        // `()` and `(void)` carry no parameters.
+        if (part == close) return;
+        if (part + 1 == close && Is(part, "void")) return;
         while (part < close)
         {
             const auto comma = FindComma(part, close);
@@ -369,6 +1220,38 @@ class GrammarParser
                 prefix_kind = GrammarKind::ErrorExpression;
             }
         }
+        else if (first == "requires")
+        {
+            auto body = pos + 1;
+            if (Is(body, "(") && m_match[body] != Invalid) body = SkipGroup(body, end);
+            while (body < end && !Is(body, "{") && !Is(body, ";")) ++body;
+            if (Is(body, "{") && m_match[body] != Invalid)
+            {
+                const auto close = m_match[body];
+                const auto node = Add(GrammarKind::RequiresExpression, pos, close + 1, parent);
+                auto requirement = body + 1;
+                while (requirement < close)
+                {
+                    const auto semi = FindSemicolon(requirement, close);
+                    const auto requirement_end = semi < close ? semi + 1 : close;
+                    if (requirement_end > requirement)
+                    {
+                        const auto item = Add(GrammarKind::Requirement, requirement, requirement_end, node);
+                        if (semi < close && semi > requirement) ParseExpression(requirement, semi, item);
+                    }
+                    requirement = requirement_end;
+                }
+                pos = close + 1;
+                root = node;
+                prefix_kind = GrammarKind::RequiresExpression;
+            }
+            else
+            {
+                root = Add(GrammarKind::ErrorExpression, pos, body, parent);
+                pos = body;
+                prefix_kind = GrammarKind::ErrorExpression;
+            }
+        }
         else if (m_tree.m_tokens[m_sig[pos]].kind == TokenKind::Identifier)
         {
             root = Add(GrammarKind::IdentifierExpression, pos, pos + 1, parent);
@@ -440,10 +1323,21 @@ class GrammarParser
             {
                 const auto close = FindTemplateClose(pos, end);
                 const auto after_template = close == Invalid ? end : close + 1;
-                if (close != Invalid &&
-                    (after_template == end || Is(after_template, "(") || Is(after_template, "{") ||
-                     Is(after_template, "::") || Is(after_template, ",") || Is(after_template, ">") ||
-                     Is(after_template, ">>") || m_tree.m_tokens[m_sig[after_template]].kind == TokenKind::Identifier))
+                const auto follows_template = after_template == end ||
+                    Is(after_template, "(") || Is(after_template, "{") || Is(after_template, "::") ||
+                    Is(after_template, ",") || Is(after_template, ">") || Is(after_template, ">>") ||
+                    Is(after_template, ";") || Is(after_template, ")") || Is(after_template, "]") ||
+                    Is(after_template, ".") || Is(after_template, "->") || Is(after_template, "?") ||
+                    Is(after_template, ":") || Is(after_template, "||") || Is(after_template, "&&") ||
+                    Is(after_template, "|") || Is(after_template, "^") || Is(after_template, "&") ||
+                    Is(after_template, "==") || Is(after_template, "!=") || Is(after_template, "<") ||
+                    Is(after_template, ">") || Is(after_template, "<=") || Is(after_template, ">=") ||
+                    Is(after_template, "<=>") || Is(after_template, "<<") || Is(after_template, ">>") ||
+                    Is(after_template, "+") || Is(after_template, "-") || Is(after_template, "*") ||
+                    Is(after_template, "/") || Is(after_template, "%") || Is(after_template, "++") ||
+                    Is(after_template, "--") ||
+                    m_tree.m_tokens[m_sig[after_template]].kind == TokenKind::Identifier;
+                if (close != Invalid && follows_template)
                 {
                     const auto node = Add(GrammarKind::TemplateIdExpression, begin, close + 1, parent);
                     m_tree.m_nodes[root].parent = node;
@@ -699,6 +1593,20 @@ class GrammarParser
                 pos = SkipDirective(pos, end, parent);
                 continue;
             }
+            auto exported_head = pos;
+            if (Is(exported_head, "export")) ++exported_head;
+            if (Is(exported_head, "module") || Is(exported_head, "import"))
+            {
+                const auto semi = FindSemicolon(pos, end);
+                if (semi < end)
+                {
+                    const auto kind = Is(exported_head, "module") ? GrammarKind::ModuleDeclaration
+                                                                   : GrammarKind::ImportDeclaration;
+                    Add(kind, pos, semi + 1, parent);
+                    pos = semi + 1;
+                    continue;
+                }
+            }
             auto declaration_start = pos;
             const bool is_template = Is(pos, "template");
             if (is_template)
@@ -735,6 +1643,18 @@ class GrammarParser
                     break;
                 }
             }
+            std::size_t leading_req = Invalid;
+            std::size_t leading_req_end = Invalid;
+            if (Is(declaration_start, "requires") && !IsRequiresExpressionAt(declaration_start, end))
+            {
+                const auto split = FindLeadingRequiresSplit(declaration_start, end);
+                if (split != Invalid && split > declaration_start)
+                {
+                    leading_req = declaration_start;
+                    leading_req_end = split;
+                    declaration_start = split;
+                }
+            }
             const bool namespace_decl = Is(declaration_start, "namespace");
             const bool record_decl = Is(declaration_start, "class") || Is(declaration_start, "struct") ||
                                      Is(declaration_start, "union") || Is(declaration_start, "enum");
@@ -746,6 +1666,21 @@ class GrammarParser
                 if ((Is(i, "(") || Is(i, "[") ) && m_match[i] != Invalid && m_match[i] > i)
                     i = m_match[i] + 1;
                 else ++i;
+            }
+            if (Is(declaration_start, "concept"))
+            {
+                const auto semi = FindSemicolon(declaration_start, end);
+                if (semi < end)
+                {
+                    const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent) : parent;
+                    if (leading_req != Invalid)
+                        ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
+                    const auto concept_node = Add(GrammarKind::ConceptDefinition, declaration_start, semi + 1, item_parent);
+                    for (auto i = declaration_start + 1; i < semi; ++i)
+                        if (Is(i, "=")) { ParseExpression(i + 1, semi, concept_node); break; }
+                    pos = semi + 1;
+                    continue;
+                }
             }
             if (brace < end)
             {
@@ -762,6 +1697,8 @@ class GrammarParser
                     {
                         const auto wrapper = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent)
                                                          : parent;
+                        if (leading_req != Invalid)
+                            ParseRequiresConstraint(leading_req, leading_req_end, wrapper);
                         const auto declaration = Add(GrammarKind::Declaration, declaration_start, semi + 1, wrapper);
                         AddDeclarationDetails(declaration_start, semi, declaration);
                         pos = semi + 1;
@@ -773,8 +1710,16 @@ class GrammarParser
                                        function_body ? GrammarKind::FunctionDefinition : GrammarKind::Error;
                 const auto item_end = closed ? close + 1 : close;
                 const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, item_end, parent) : parent;
+                if (leading_req != Invalid && node_kind != GrammarKind::NamespaceDefinition &&
+                    node_kind != GrammarKind::RecordDefinition)
+                    ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
                 const auto node = Add(node_kind, declaration_start, item_end, item_parent);
-                if (node_kind == GrammarKind::FunctionDefinition) AddFunctionParameters(declaration_start, brace, node);
+                if (node_kind == GrammarKind::FunctionDefinition)
+                {
+                    // Full declarator parsing: return type, declarator with FunctionSuffix
+                    // (parameters, noexcept, trailing return, requires-clause).
+                    AddTypeAndDeclarator(declaration_start, brace, node);
+                }
                 if (node_kind == GrammarKind::NamespaceDefinition || node_kind == GrammarKind::RecordDefinition)
                 {
                     ParseScope(brace + 1, close, node, node_kind == GrammarKind::RecordDefinition);
@@ -795,18 +1740,28 @@ class GrammarParser
             if (semi < end)
             {
                 const auto item_parent = is_template ? Add(GrammarKind::TemplateDeclaration, start, semi + 1, parent) : parent;
+                if (leading_req != Invalid) ParseRequiresConstraint(leading_req, leading_req_end, item_parent);
                 bool function_declaration = false;
                 for (auto i = declaration_start; i < semi; ++i)
                     if (Is(i, "(") && m_match[i] != Invalid && m_match[i] < semi) function_declaration = true;
                 if (function_declaration)
                 {
                     const auto function = Add(GrammarKind::FunctionDeclaration, declaration_start, semi + 1, item_parent);
-                    AddFunctionParameters(declaration_start, semi, function);
+                    AddTypeAndDeclarator(declaration_start, semi, function);
                 }
                 else
                 {
-                    const auto declaration = Add(GrammarKind::Declaration, declaration_start, semi + 1, item_parent);
-                    AddDeclarationDetails(declaration_start, semi, declaration);
+                    const auto declaration_kind = Is(declaration_start, "concept") ? GrammarKind::ConceptDefinition :
+                                                  Is(declaration_start, "using") ? GrammarKind::UsingDeclaration :
+                                                                                  GrammarKind::Declaration;
+                    const auto declaration = Add(declaration_kind, declaration_start, semi + 1, item_parent);
+                    if (declaration_kind == GrammarKind::ConceptDefinition)
+                    {
+                        for (auto i = declaration_start + 1; i < semi; ++i)
+                            if (Is(i, "=")) { ParseExpression(i + 1, semi, declaration); break; }
+                    }
+                    else if (declaration_kind != GrammarKind::UsingDeclaration)
+                        AddDeclarationDetails(declaration_start, semi, declaration);
                 }
                 pos = semi + 1;
                 continue;
@@ -821,11 +1776,19 @@ class GrammarParser
 
 ParseTree ParseTree::Parse(std::string_view source, CppStandard standard)
 {
+    ParserOptions options;
+    options.standard = standard;
+    return Parse(source, options);
+}
+
+ParseTree ParseTree::Parse(std::string_view source, const ParserOptions& options)
+{
     ParseTree tree;
     tree.m_source = source;
-    tree.m_standard = standard;
+    tree.m_standard = options.standard;
     tree.m_tokens = Lexer(source).Lex();
-    GrammarParser parser(tree);
+    const auto preprocessing = Preprocessor(options.predefined_macros).Process(source);
+    GrammarParser parser(tree, preprocessing);
     parser.Run();
     return tree;
 }

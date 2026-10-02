@@ -1,10 +1,12 @@
 #pragma once
 
 #include <CppLsp/Cst.hpp>
+#include <CppLsp/Preprocessor.hpp>
 
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace cpplsp
@@ -49,6 +51,21 @@ enum class GrammarKind : std::uint8_t
     TypeSpecifier,
     Declarator,
     DeclaredName,
+    PointerOperator,
+    NestedNameSpecifier,
+    ArraySuffix,
+    FunctionSuffix,
+    TrailingReturnType,
+    NoexceptSpecifier,
+    AttributeSpecifier,
+    BitfieldSuffix,
+    ModuleDeclaration,
+    ImportDeclaration,
+    UsingDeclaration,
+    ConceptDefinition,
+    RequiresClause,
+    RequiresExpression,
+    Requirement,
     ErrorExpression,
     Error
 };
@@ -67,6 +84,12 @@ struct GrammarDiagnostic
     std::string message;
 };
 
+struct ParserOptions
+{
+    CppStandard standard = CppStandard::Cpp20;
+    Preprocessor::MacroMap predefined_macros;
+};
+
 // Initial recursive-descent grammar layer over the lossless lexer. It parses
 // translation-unit items and compound statements while retaining token ranges
 // for declaration/expression forms not yet covered by dedicated productions.
@@ -76,6 +99,7 @@ class ParseTree
     static constexpr std::size_t RootNode = 0;
 
     static ParseTree Parse(std::string_view source, CppStandard standard = CppStandard::Cpp20);
+    static ParseTree Parse(std::string_view source, const ParserOptions& options);
 
     std::string_view Source() const noexcept { return m_source; }
     CppStandard Standard() const noexcept { return m_standard; }
