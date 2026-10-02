@@ -1,9 +1,9 @@
-#include <CppLsp/Parser.hpp>
+#include <Heimdall/Parser.hpp>
 
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 class GrammarParser
@@ -1976,4 +1976,4 @@ std::vector<std::size_t> ParseTree::Children(std::size_t node_index) const
     return children;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

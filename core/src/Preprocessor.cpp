@@ -1,10 +1,10 @@
-#include <CppLsp/Preprocessor.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 #include <cctype>
 #include <charconv>
 #include <string_view>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -416,4 +416,4 @@ PreprocessorResult Preprocessor::Process(std::string_view source) const
     return result;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

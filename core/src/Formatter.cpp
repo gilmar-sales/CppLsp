@@ -1,13 +1,13 @@
-#include <CppLsp/Formatter.hpp>
+#include <Heimdall/Formatter.hpp>
 
-#include <CppLsp/Lexer.hpp>
-#include <CppLsp/Preprocessor.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 #include <algorithm>
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -123,4 +123,4 @@ std::string Formatter::Format(std::string_view source) const
     return output;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

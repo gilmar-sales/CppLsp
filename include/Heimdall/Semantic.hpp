@@ -1,6 +1,6 @@
 #pragma once
 
-#include <CppLsp/CompileCommands.hpp>
+#include <Heimdall/CompileCommands.hpp>
 
 #include <cstdint>
 #include <string>
@@ -8,7 +8,7 @@
 #include <vector>
 #include <unordered_set>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class AsteriskMeaning
@@ -45,4 +45,4 @@ class SemanticAnalyzer
                                                         const CompileCommand* command = nullptr) const;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

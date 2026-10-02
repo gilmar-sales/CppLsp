@@ -1,14 +1,14 @@
 #pragma once
 
 #include <expected>
-#include <CppLsp/Language.hpp>
+#include <Heimdall/Language.hpp>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 struct CompileCommand
@@ -34,4 +34,4 @@ class CompileDatabase
     std::vector<CompileCommand> m_commands;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

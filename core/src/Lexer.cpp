@@ -1,6 +1,6 @@
-#include <CppLsp/Lexer.hpp>
+#include <Heimdall/Lexer.hpp>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -255,4 +255,4 @@ std::string_view Lexer::Text(const Token& token) const noexcept
     return m_source.substr(token.offset, token.length);
 }
 
-} // namespace cpplsp
+} // namespace heimdall

@@ -1,10 +1,10 @@
-#include <CppLsp/Buffer.hpp>
-#include <CppLsp/CompileCommands.hpp>
-#include <CppLsp/Formatter.hpp>
-#include <CppLsp/LineTable.hpp>
-#include <CppLsp/Parser.hpp>
-#include <CppLsp/Rules.hpp>
-#include <CppLsp/Semantic.hpp>
+#include <Heimdall/Buffer.hpp>
+#include <Heimdall/CompileCommands.hpp>
+#include <Heimdall/Formatter.hpp>
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/Parser.hpp>
+#include <Heimdall/Rules.hpp>
+#include <Heimdall/Semantic.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -40,7 +40,7 @@ struct Options
     bool fix = false;
     bool semantic = false;
     bool std_override = false;
-    cpplsp::CppStandard standard = cpplsp::CppStandard::Cpp20;
+    heimdall::CppStandard standard = heimdall::CppStandard::Cpp20;
     fs::path compile_commands;
     std::vector<fs::path> inputs;
 };
@@ -49,7 +49,7 @@ struct SyntaxDiagnostic
 {
     std::uint32_t line = 1;
     std::uint32_t column = 1;
-    std::string code = "CPPLSP900";
+    std::string code = "HEIMDALL900";
     std::string message;
 };
 
@@ -65,8 +65,8 @@ struct FileResult
 {
     fs::path path;
     std::string error;
-    std::vector<cpplsp::Diagnostic> diagnostics;
-    std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
+    std::vector<heimdall::Diagnostic> diagnostics;
+    std::vector<heimdall::SemanticDiagnostic> semantic_diagnostics;
     std::vector<SyntaxDiagnostic> syntax_diagnostics;
     std::vector<ParseNodeSummary> nodes;
     std::string standard_name = "c++20";
@@ -78,9 +78,9 @@ struct FileResult
     std::size_t ambiguous_count = 0;
 };
 
-std::string_view GrammarKindName(cpplsp::GrammarKind kind)
+std::string_view GrammarKindName(heimdall::GrammarKind kind)
 {
-    using cpplsp::GrammarKind;
+    using heimdall::GrammarKind;
     switch (kind)
     {
     case GrammarKind::TranslationUnit: return "TranslationUnit";
@@ -142,42 +142,42 @@ std::string_view GrammarKindName(cpplsp::GrammarKind kind)
     return "Unknown";
 }
 
-std::string_view StandardName(cpplsp::CppStandard standard)
+std::string_view StandardName(heimdall::CppStandard standard)
 {
     switch (standard)
     {
-    case cpplsp::CppStandard::Cpp20: return "c++20";
-    case cpplsp::CppStandard::Cpp23: return "c++23";
-    case cpplsp::CppStandard::Cpp26: return "c++26";
+    case heimdall::CppStandard::Cpp20: return "c++20";
+    case heimdall::CppStandard::Cpp23: return "c++23";
+    case heimdall::CppStandard::Cpp26: return "c++26";
     }
     return "c++20";
 }
 
-bool ParseStandardValue(std::string_view value, cpplsp::CppStandard& standard)
+bool ParseStandardValue(std::string_view value, heimdall::CppStandard& standard)
 {
     if (value == "c++20" || value == "gnu++20" || value == "c++2a" || value == "gnu++2a")
     {
-        standard = cpplsp::CppStandard::Cpp20;
+        standard = heimdall::CppStandard::Cpp20;
         return true;
     }
     if (value == "c++23" || value == "gnu++23" || value == "c++2b" || value == "gnu++2b")
     {
-        standard = cpplsp::CppStandard::Cpp23;
+        standard = heimdall::CppStandard::Cpp23;
         return true;
     }
     if (value == "c++26" || value == "gnu++26" || value == "c++2c" || value == "gnu++2c" ||
         value == "c++latest")
     {
-        standard = cpplsp::CppStandard::Cpp26;
+        standard = heimdall::CppStandard::Cpp26;
         return true;
     }
     return false;
 }
 
-cpplsp::ParserOptions ParserOptionsForFile(const fs::path& path, const Options& options,
-                                           const cpplsp::CompileDatabase* database)
+heimdall::ParserOptions ParserOptionsForFile(const fs::path& path, const Options& options,
+                                           const heimdall::CompileDatabase* database)
 {
-    cpplsp::ParserOptions parser_options;
+    heimdall::ParserOptions parser_options;
     if (options.std_override) parser_options.standard = options.standard;
     if (database != nullptr)
     {
@@ -191,16 +191,16 @@ cpplsp::ParserOptions ParserOptionsForFile(const fs::path& path, const Options& 
 }
 
 std::vector<SyntaxDiagnostic> ToSyntaxDiagnostics(std::string_view source,
-                                                 const std::vector<cpplsp::GrammarDiagnostic>& grammar)
+                                                 const std::vector<heimdall::GrammarDiagnostic>& grammar)
 {
-    cpplsp::LineTable lines;
+    heimdall::LineTable lines;
     lines.Build(source);
     std::vector<SyntaxDiagnostic> out;
     out.reserve(grammar.size());
     for (const auto& diagnostic : grammar)
     {
         const auto position = lines.Lookup(diagnostic.offset);
-        out.push_back({ position.line, position.column, "CPPLSP900", diagnostic.message });
+        out.push_back({ position.line, position.column, "HEIMDALL900", diagnostic.message });
     }
     return out;
 }
@@ -374,11 +374,11 @@ std::string JsonEscape(std::string_view text)
     return out;
 }
 
-void ProcessFile(const fs::path& path, const Options& options, const cpplsp::CompileDatabase* database,
+void ProcessFile(const fs::path& path, const Options& options, const heimdall::CompileDatabase* database,
                  FileResult& result)
 {
     result.path = path;
-    auto buffer = cpplsp::MappedBuffer::Open(path.string());
+    auto buffer = heimdall::MappedBuffer::Open(path.string());
     if (!buffer)
     {
         result.error = buffer.error();
@@ -389,7 +389,7 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
         options.command == Command::Check)
     {
         const auto parser_options = ParserOptionsForFile(path, options, database);
-        const auto tree = cpplsp::ParseTree::Parse(source, parser_options);
+        const auto tree = heimdall::ParseTree::Parse(source, parser_options);
         result.standard_name = std::string(StandardName(tree.Standard()));
         result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree.Diagnostics());
         if (options.command == Command::Parse)
@@ -421,7 +421,7 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
         if (command != nullptr)
         {
             result.has_semantic_context = true;
-            const cpplsp::SemanticAnalyzer analyzer;
+            const heimdall::SemanticAnalyzer analyzer;
             const auto types = analyzer.CollectTypeNames(source, command);
             result.type_count = types.size();
             result.semantic_diagnostics = analyzer.AnalyzeUnusedLocals(source, command);
@@ -434,10 +434,10 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
                 const auto line = source.substr(line_start, line_end - line_start);
                 switch (analyzer.ClassifyAsteriskStatement(line, types, no_values))
                 {
-                case cpplsp::AsteriskMeaning::Declaration: ++result.declaration_count; break;
-                case cpplsp::AsteriskMeaning::Multiplication: break;
-                case cpplsp::AsteriskMeaning::Ambiguous: ++result.ambiguous_count; break;
-                case cpplsp::AsteriskMeaning::NotApplicable: break;
+                case heimdall::AsteriskMeaning::Declaration: ++result.declaration_count; break;
+                case heimdall::AsteriskMeaning::Multiplication: break;
+                case heimdall::AsteriskMeaning::Ambiguous: ++result.ambiguous_count; break;
+                case heimdall::AsteriskMeaning::NotApplicable: break;
                 }
                 line_start = line_end == source.size() ? source.size() : line_end + 1;
             }
@@ -445,22 +445,22 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
     }
     if (options.command == Command::Format)
     {
-        result.output = cpplsp::Formatter().Format(source);
+        result.output = heimdall::Formatter().Format(source);
         result.changed = result.output != source;
     }
     else
     {
-        result.diagnostics = cpplsp::RuleEngine().Analyze(source);
+        result.diagnostics = heimdall::RuleEngine().Analyze(source);
         if (options.fix && !result.diagnostics.empty())
         {
-            result.output = cpplsp::RuleEngine::ApplyFixes(source, result.diagnostics);
+            result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics);
             result.changed = result.output != source;
         }
     }
 }
 
 void RunParallel(const std::vector<fs::path>& files, const Options& options,
-                 const cpplsp::CompileDatabase* database, std::vector<FileResult>& results)
+                 const heimdall::CompileDatabase* database, std::vector<FileResult>& results)
 {
     results.resize(files.size());
     std::atomic_size_t next { 0 };
@@ -488,18 +488,18 @@ int main(int argc, char** argv)
     Options options {};
     if (!ParseOptions(argc, argv, options))
     {
-        std::cerr << "usage: cpplsp <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] <files-or-directories...>\n";
+        std::cerr << "usage: heimdall <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] <files-or-directories...>\n";
         return 2;
     }
 
     std::vector<fs::path> files;
     if (!CollectFiles(options.inputs, files)) return 2;
 
-    cpplsp::CompileDatabase database;
-    const cpplsp::CompileDatabase* database_ptr = nullptr;
+    heimdall::CompileDatabase database;
+    const heimdall::CompileDatabase* database_ptr = nullptr;
     if (!options.compile_commands.empty())
     {
-        auto loaded = cpplsp::CompileDatabase::Load(options.compile_commands);
+        auto loaded = heimdall::CompileDatabase::Load(options.compile_commands);
         if (!loaded)
         {
             std::cerr << loaded.error() << '\n';
@@ -519,8 +519,8 @@ int main(int argc, char** argv)
 
     bool failed = false;
     bool has_diagnostics = false;
-    const auto severity_name = [](cpplsp::Severity severity) {
-        return severity == cpplsp::Severity::Error ? "error" : "warning";
+    const auto severity_name = [](heimdall::Severity severity) {
+        return severity == heimdall::Severity::Error ? "error" : "warning";
     };
     if (options.command == Command::Parse && options.json)
     {

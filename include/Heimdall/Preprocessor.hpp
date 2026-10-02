@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class DirectiveKind
@@ -67,4 +67,4 @@ class Preprocessor
     MacroMap m_predefined;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

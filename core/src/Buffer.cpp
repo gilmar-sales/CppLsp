@@ -1,4 +1,4 @@
-#include <CppLsp/Buffer.hpp>
+#include <Heimdall/Buffer.hpp>
 
 #include <cstdio>
 #include <utility>
@@ -18,7 +18,7 @@
 #include <unistd.h>
 #endif
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -236,4 +236,4 @@ std::expected<MappedBuffer, std::string> MappedBuffer::OpenBuffered(const char* 
     return out;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

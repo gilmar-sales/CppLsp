@@ -1,7 +1,7 @@
 #pragma once
 
-#include <CppLsp/Cst.hpp>
-#include <CppLsp/Preprocessor.hpp>
+#include <Heimdall/Cst.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 #include <cstddef>
 #include <string>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class GrammarKind : std::uint8_t
@@ -119,4 +119,4 @@ class ParseTree
     std::vector<GrammarDiagnostic> m_diagnostics;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

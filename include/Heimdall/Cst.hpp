@@ -1,7 +1,7 @@
 #pragma once
 
-#include <CppLsp/Lexer.hpp>
-#include <CppLsp/Language.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Language.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class SyntaxKind : std::uint8_t
@@ -66,4 +66,4 @@ class SyntaxTree
     std::vector<ParseDiagnostic> m_diagnostics;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

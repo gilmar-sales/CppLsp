@@ -13,6 +13,6 @@ file(GLOB BENCH_SRC CONFIGURE_DEPENDS "src/*.cpp")
 
 add_executable(CoreBench ${BENCH_SRC})
 
-target_link_libraries(CoreBench PRIVATE cpplsp::core benchmark::benchmark benchmark::benchmark_main)
-target_compile_definitions(CoreBench PRIVATE CPPLSP_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
+target_link_libraries(CoreBench PRIVATE heimdall::core benchmark::benchmark benchmark::benchmark_main)
+target_compile_definitions(CoreBench PRIVATE HEIMDALL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
 target_compile_features(CoreBench PRIVATE cxx_std_26)

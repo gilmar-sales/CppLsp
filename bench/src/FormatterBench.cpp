@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <CppLsp/Buffer.hpp>
-#include <CppLsp/Formatter.hpp>
+#include <Heimdall/Buffer.hpp>
+#include <Heimdall/Formatter.hpp>
 
 #include <filesystem>
 #include <string>
@@ -14,10 +14,10 @@ void BM_Format(benchmark::State& state)
 {
     std::vector<std::string> sources;
     std::size_t source_bytes = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(CPPLSP_CORPUS_DIR))
+    for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
     {
         if (!entry.is_regular_file()) continue;
-        auto buffer = cpplsp::MappedBuffer::Open(entry.path().string());
+        auto buffer = heimdall::MappedBuffer::Open(entry.path().string());
         if (!buffer)
         {
             state.SkipWithError(buffer.error().c_str());
@@ -32,7 +32,7 @@ void BM_Format(benchmark::State& state)
         return;
     }
 
-    const cpplsp::Formatter formatter;
+    const heimdall::Formatter formatter;
     std::size_t output_bytes = 0;
     for (auto _ : state)
     {

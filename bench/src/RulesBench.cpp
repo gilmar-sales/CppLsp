@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <CppLsp/Buffer.hpp>
-#include <CppLsp/Rules.hpp>
+#include <Heimdall/Buffer.hpp>
+#include <Heimdall/Rules.hpp>
 
 #include <filesystem>
 #include <string>
@@ -14,10 +14,10 @@ void BM_RuleEngine(benchmark::State& state)
 {
     std::vector<std::string> sources;
     std::size_t source_bytes = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(CPPLSP_CORPUS_DIR))
+    for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
     {
         if (!entry.is_regular_file()) continue;
-        auto buffer = cpplsp::MappedBuffer::Open(entry.path().string());
+        auto buffer = heimdall::MappedBuffer::Open(entry.path().string());
         if (!buffer)
         {
             state.SkipWithError(buffer.error().c_str());
@@ -32,7 +32,7 @@ void BM_RuleEngine(benchmark::State& state)
         return;
     }
 
-    const cpplsp::RuleEngine engine;
+    const heimdall::RuleEngine engine;
     std::size_t diagnostic_count = 0;
     for (auto _ : state)
     {

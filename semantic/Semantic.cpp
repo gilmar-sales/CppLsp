@@ -1,13 +1,13 @@
-#include <CppLsp/Lexer.hpp>
-#include <CppLsp/LineTable.hpp>
-#include <CppLsp/Preprocessor.hpp>
-#include <CppLsp/Semantic.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/Semantic.hpp>
 
 #include <array>
 #include <string_view>
 #include <utility>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -245,11 +245,11 @@ std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(std::strin
         if (!used)
         {
             const auto position = line_table.Lookup(tokens[name_index].offset);
-            diagnostics.push_back({ "CPPLSP101", "local variable '" + std::string(name) + "' is never used",
+            diagnostics.push_back({ "HEIMDALL101", "local variable '" + std::string(name) + "' is never used",
                                     tokens[name_index].offset, name.size(), position.line, position.column });
         }
     }
     return diagnostics;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

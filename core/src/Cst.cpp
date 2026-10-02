@@ -1,8 +1,8 @@
-#include <CppLsp/Cst.hpp>
+#include <Heimdall/Cst.hpp>
 
 #include <string_view>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -125,4 +125,4 @@ std::vector<std::size_t> SyntaxTree::Children(std::size_t node_index) const
     return result;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

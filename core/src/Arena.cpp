@@ -1,6 +1,6 @@
-#include <CppLsp/Arena.hpp>
+#include <Heimdall/Arena.hpp>
 
-namespace cpplsp
+namespace heimdall
 {
 
 Arena::Arena(std::size_t initial_capacity) : m_resource(initial_capacity) {}
@@ -20,4 +20,4 @@ void Arena::Reset()
     m_used = 0;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

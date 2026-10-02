@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class Severity : std::uint8_t
@@ -62,4 +62,4 @@ class RuleEngine
     RuleOptions m_options;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

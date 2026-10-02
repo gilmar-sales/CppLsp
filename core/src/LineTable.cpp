@@ -1,8 +1,8 @@
-#include <CppLsp/LineTable.hpp>
+#include <Heimdall/LineTable.hpp>
 
 #include <algorithm>
 
-namespace cpplsp
+namespace heimdall
 {
 
 void LineTable::Build(std::string_view text)
@@ -34,4 +34,4 @@ LineTable::Position LineTable::Lookup(std::size_t offset) const
     return { static_cast<std::uint32_t>(line + 1), static_cast<std::uint32_t>(offset - *it + 1) };
 }
 
-} // namespace cpplsp
+} // namespace heimdall

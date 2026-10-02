@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
-#include <CppLsp/Parser.hpp>
+#include <Heimdall/Parser.hpp>
 
 #include <string_view>
 
 namespace
 {
 
-std::size_t Count(const cpplsp::ParseTree& tree, cpplsp::GrammarKind kind)
+std::size_t Count(const heimdall::ParseTree& tree, heimdall::GrammarKind kind)
 {
     std::size_t count = 0;
     for (const auto& node : tree.Nodes()) count += node.kind == kind;
@@ -23,15 +23,15 @@ TEST(ParserSpec, ParsesTranslationUnitDefinitionsAndCompoundStatements)
         "struct Item { int value; };\n"
         "int run(int x) { int y = x; if (y) return y; else return 0; }\n"
         "}\n";
-    const auto tree = cpplsp::ParseTree::Parse(source, cpplsp::CppStandard::Cpp23);
-    EXPECT_EQ(tree.Standard(), cpplsp::CppStandard::Cpp23);
+    const auto tree = heimdall::ParseTree::Parse(source, heimdall::CppStandard::Cpp23);
+    EXPECT_EQ(tree.Standard(), heimdall::CppStandard::Cpp23);
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NamespaceDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RecordDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::CompoundStatement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::IfStatement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::NamespaceDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CompoundStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::IfStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 2);
 }
 
 TEST(ParserSpec, SelectsConditionalBranchesUsingPredefinedCompileMacros)
@@ -42,71 +42,71 @@ TEST(ParserSpec, SelectsConditionalBranchesUsingPredefinedCompileMacros)
         "#else\n"
         "int disabled() { return 2; }\n"
         "#endif\n";
-    cpplsp::ParserOptions options;
-    options.standard = cpplsp::CppStandard::Cpp23;
+    heimdall::ParserOptions options;
+    options.standard = heimdall::CppStandard::Cpp23;
     options.predefined_macros.emplace("FEATURE", "1");
-    const auto tree = cpplsp::ParseTree::Parse(source, options);
+    const auto tree = heimdall::ParseTree::Parse(source, options);
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(tree.Standard(), cpplsp::CppStandard::Cpp23);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
+    EXPECT_EQ(tree.Standard(), heimdall::CppStandard::Cpp23);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
 }
 
 TEST(ParserSpec, RecoversAtSemicolonAndContinuesParsing)
 {
     constexpr std::string_view source = "int f() { int broken return 1; return 2; } int g;";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     EXPECT_FALSE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Error), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Declaration), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Error), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Declaration), 1);
 }
 
 TEST(ParserSpec, ReportsUnclosedFunctionBodyAndKeepsPartialTree)
 {
-    const auto tree = cpplsp::ParseTree::Parse("int f() { return 1;");
+    const auto tree = heimdall::ParseTree::Parse("int f() { return 1;");
     EXPECT_FALSE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::CompoundStatement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CompoundStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
 }
 
 TEST(ParserSpec, BuildsExpressionNodesForPrecedenceAndPostfixForms)
 {
-    const auto tree = cpplsp::ParseTree::Parse("int f() { return call(value + 2 * other[0]); }");
+    const auto tree = heimdall::ParseTree::Parse("int f() { return call(value + 2 * other[0]); }");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::CallExpression), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::SubscriptExpression), 1);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::BinaryExpression), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::SubscriptExpression), 1);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::BinaryExpression), 2);
 }
 
 TEST(ParserSpec, ParsesParametersAndDeclaratorsWithInitializers)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "int sum(int left, int right = 2) { int first = left, second{right}; return first + second; }");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ParameterDeclaration), 2);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::InitDeclarator), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 5);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::BinaryExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::InitDeclarator), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 5);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::BinaryExpression), 1);
 }
 
 TEST(ParserSpec, KeepsTemplateArgumentCommasInsideParameterAndDeclaratorTypes)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "template<class T, class U> struct Pair {};\n"
         "Pair<int, long> combine(Pair<int, long> left, Pair<char, short> right) {\n"
         "  Pair<int, long> first{}, second{}; return first;\n"
         "}");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ParameterDeclaration), 2);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::InitDeclarator), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::InitDeclarator), 2);
 }
 
 TEST(ParserSpec, ParsesLambdasAndCommonCompleteStatementForms)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "int f(int value) {\n"
         "  auto fn = [value](int x) { return value + x; };\n"
         "  for (int i = 0; i < value; ++i) { if (i) continue; }\n"
@@ -115,10 +115,10 @@ TEST(ParserSpec, ParsesLambdasAndCommonCompleteStatementForms)
         "  try { return fn(value); } catch (...) { return 0; }\n"
         "}");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::LambdaExpression), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DoStatement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::CaseLabel), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::TryStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::LambdaExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DoStatement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CaseLabel), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TryStatement), 1);
 }
 
 TEST(ParserSpec, KeepsPreprocessorDirectiveBodiesOpaque)
@@ -133,10 +133,10 @@ TEST(ParserSpec, KeepsPreprocessorDirectiveBodiesOpaque)
         "  return 2;\n"
         "#endif\n"
         "}\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::PreprocessorDirective), 5);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ReturnStatement), 1);
+    const auto tree = heimdall::ParseTree::Parse(source);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::PreprocessorDirective), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ReturnStatement), 1);
 }
 
 TEST(ParserSpec, MaintainsValidParentLinksAndContainedTokenRanges)
@@ -144,9 +144,9 @@ TEST(ParserSpec, MaintainsValidParentLinksAndContainedTokenRanges)
     constexpr std::string_view source =
         "template<class T, class U> struct Pair { T first; U second; };\n"
         "int f(Pair<int, long> p) { return p.first + p.second * 2; }\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_FALSE(tree.Nodes().empty());
-    EXPECT_EQ(tree.Nodes()[cpplsp::ParseTree::RootNode].kind, cpplsp::GrammarKind::TranslationUnit);
+    EXPECT_EQ(tree.Nodes()[heimdall::ParseTree::RootNode].kind, heimdall::GrammarKind::TranslationUnit);
     for (std::size_t i = 1; i < tree.Nodes().size(); ++i)
     {
         const auto& node = tree.Nodes()[i];
@@ -159,17 +159,17 @@ TEST(ParserSpec, MaintainsValidParentLinksAndContainedTokenRanges)
 
 TEST(ParserSpec, ParsesNestedTemplateIdsAsPostfixExpressionsNotComparisons)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "int f() { return choose<std::pair<int, long>, std::vector<char>>(make<int>(), value); }");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::TemplateIdExpression), 3);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::TemplateArgument), 5);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::CallExpression), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::TemplateIdExpression), 3);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::TemplateArgument), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::CallExpression), 2);
 }
 
 TEST(ParserSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "int transform(const Widget& input, int scale = 1);\n"
         "struct Widget {\n"
         "  Widget();\n"
@@ -177,31 +177,31 @@ TEST(ParserSpec, ParsesFunctionDeclarationsAndClassMemberPrototypes)
         "  int data;\n"
         "};\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 3);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ParameterDeclaration), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 5);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ParameterDeclaration), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 5);
 }
 
 TEST(ParserSpec, ParsesModuleUnitsConceptsAndRequiresClauses)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "export module sample.core;\n"
         "import std;\n"
         "export import :detail;\n"
         "template<class T> concept HasValue = requires(T value) { value.get(); };\n"
         "template<class T> void use(T value) requires HasValue<T> { }\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ModuleDeclaration), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ImportDeclaration), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::ConceptDefinition), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresExpression), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Requirement), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresClause), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ModuleDeclaration), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ImportDeclaration), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::ConceptDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresExpression), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Requirement), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 1);
 }
 
 TEST(ParserSpec, ParsesComplexDeclaratorsWithPointersArraysAndQualifiers)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "int (*fp)(int, char);\n"
         "int values[3][4];\n"
         "const char* const* argv;\n"
@@ -210,44 +210,44 @@ TEST(ParserSpec, ParsesComplexDeclaratorsWithPointersArraysAndQualifiers)
         "std::vector<int>::iterator it;\n"
         "int Widget::*mp;\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::DeclaredName), 7);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::PointerOperator), 4);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::ArraySuffix), 2);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::FunctionSuffix), 1);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::NestedNameSpecifier), 1);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::DeclaredName), 7);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::PointerOperator), 4);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::ArraySuffix), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::FunctionSuffix), 1);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::NestedNameSpecifier), 1);
 }
 
 TEST(ParserSpec, ParsesFunctionSuffixesWithTrailingReturnNoexceptAndAttributes)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "[[nodiscard]] auto compute(int x) -> int;\n"
         "void stable() noexcept;\n"
         "void guarded() noexcept(true);\n"
         "struct Flags { int x : 3; unsigned y : 4; };\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 3);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::TrailingReturnType), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NoexceptSpecifier), 2);
-    EXPECT_GE(Count(tree, cpplsp::GrammarKind::AttributeSpecifier), 1);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::BitfieldSuffix), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TrailingReturnType), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::NoexceptSpecifier), 2);
+    EXPECT_GE(Count(tree, heimdall::GrammarKind::AttributeSpecifier), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::BitfieldSuffix), 2);
 }
 
 TEST(ParserSpec, ParsesLeadingRequiresClausesBeforeDeclarationsAndDefinitions)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "template<class T> requires HasValue<T> void use(T value);\n"
         "template<class T> requires Sortable<T> void sort(T& value) { }\n"
         "template<class T> void check(T value) requires Checkable<T> && Printable<T>;\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::TemplateDeclaration), 3);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RequiresClause), 3);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDeclaration), 2);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::FunctionDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::TemplateDeclaration), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RequiresClause), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDeclaration), 2);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::FunctionDefinition), 1);
 }
 
 TEST(ParserSpec, ParsesEnumDefinitionsWithCommaSeparatedEnumerators)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "namespace fs = std::filesystem;\n"
         "namespace\n"
         "{\n"
@@ -262,11 +262,11 @@ TEST(ParserSpec, ParsesEnumDefinitionsWithCommaSeparatedEnumerators)
         "enum Old { A = 1 << 2, B, C };\n"
         "enum class Mode : unsigned char { Off, On };\n");
     EXPECT_TRUE(tree.Diagnostics().empty());
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::RecordDefinition), 3);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Enumerator), 9);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::RecordDefinition), 3);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Enumerator), 9);
     // 9 enumerators plus the `fs` namespace-alias name.
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 10);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NamespaceDefinition), 1);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 10);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::NamespaceDefinition), 1);
 }
 
 TEST(ParserSpec, ReportsMissingSemicolonBetweenStructMembers)
@@ -278,7 +278,7 @@ TEST(ParserSpec, ReportsMissingSemicolonBetweenStructMembers)
         "    int compile_commands\n"
         "    int inputs;\n"
         "};\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 2);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int compile_commands"));
@@ -303,7 +303,7 @@ TEST(ParserSpec, ReportsMissingSemicolonBetweenLocalDeclarations)
         "    int second = first;\n"
         "    return second;\n"
         "}\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int second"));
@@ -317,7 +317,7 @@ TEST(ParserSpec, ReportsMissingSemicolonBetweenExpressionStatements)
         "    run()\n"
         "    stop();\n"
         "}\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'stop'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("stop"));
@@ -326,7 +326,7 @@ TEST(ParserSpec, ReportsMissingSemicolonBetweenExpressionStatements)
 TEST(ParserSpec, ReportsMissingCommaBetweenParameters)
 {
     constexpr std::string_view source = "int sum(int left int right);\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ',' before 'int'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int right"));
@@ -337,7 +337,7 @@ TEST(ParserSpec, ReportsMissingSemicolonAfterFunctionDeclaration)
     constexpr std::string_view source =
         "void first()\n"
         "int second();\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int second"));
@@ -353,17 +353,17 @@ TEST(ParserSpec, ReportsMissingCommaBetweenEnumerators)
         "    Format,\n"
         "    Parse\n"
         "};\n";
-    const auto tree = cpplsp::ParseTree::Parse(source);
+    const auto tree = heimdall::ParseTree::Parse(source);
     ASSERT_EQ(tree.Diagnostics().size(), 1);
     EXPECT_EQ(tree.Diagnostics()[0].message, "expected ',' before 'Format'");
     EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("Format"));
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Enumerator), 4);
-    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::Enumerator), 4);
+    EXPECT_EQ(Count(tree, heimdall::GrammarKind::DeclaredName), 4);
 }
 
 TEST(ParserSpec, ParsesCastsNewExpressionsAndLiteralFormsWithoutMissingSemicolonNoise)
 {
-    const auto tree = cpplsp::ParseTree::Parse(
+    const auto tree = heimdall::ParseTree::Parse(
         "struct Scale\n"
         "{\n"
         "    int ratio = (int)1.5;\n"

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <CppLsp/Preprocessor.hpp>
+#include <Heimdall/Preprocessor.hpp>
 
 #include <string>
 
@@ -15,10 +15,10 @@ TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
         "int rejected;\n"
         "#endif\n";
 
-    const auto result = cpplsp::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source);
     EXPECT_EQ(result.active_source, "int selected = 1;\n");
     ASSERT_EQ(result.directives.size(), 5);
-    EXPECT_EQ(result.directives.front().kind, cpplsp::DirectiveKind::Include);
+    EXPECT_EQ(result.directives.front().kind, heimdall::DirectiveKind::Include);
     ASSERT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
 }
 
@@ -41,14 +41,14 @@ TEST(PreprocessorSpec, SupportsNestedConditionalsAndUndef)
         "undefined_yes\n"
         "#endif\n";
 
-    const auto result = cpplsp::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source);
     EXPECT_EQ(result.active_source, "outer\ninner_yes\nundefined_yes\n");
     ASSERT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
 }
 
 TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
 {
-    const auto result = cpplsp::Preprocessor().Process("#else\n#if 1\nactive\n");
+    const auto result = heimdall::Preprocessor().Process("#else\n#if 1\nactive\n");
     EXPECT_EQ(result.diagnostics.size(), 2);
     EXPECT_EQ(result.diagnostics[0].message, "#else without matching #if");
     EXPECT_EQ(result.diagnostics[1].message, "unterminated conditional directive");
@@ -57,7 +57,7 @@ TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
 
 TEST(PreprocessorSpec, DoesNotExpandMacrosInsideQuotedLiterals)
 {
-    const auto result = cpplsp::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n");
+    const auto result = heimdall::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n");
     EXPECT_EQ(result.active_source, "const char* s = \"NAME\"; // NAME\n");
 }
 
@@ -70,7 +70,7 @@ TEST(PreprocessorSpec, EvaluatesIntegerComparisonsInIfExpressions)
         "#else\n"
         "rejected\n"
         "#endif\n";
-    const auto result = cpplsp::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source);
     EXPECT_EQ(result.active_source, "selected\n");
     EXPECT_TRUE(result.diagnostics.empty());
 }

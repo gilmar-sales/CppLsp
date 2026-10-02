@@ -1,7 +1,7 @@
 {
-  "name": "cpplsp-vscode",
-  "displayName": "CppLsp - C++ Lint and Format",
-  "description": "C++ diagnostics, quick fixes, and formatting powered by CppLsp.",
+  "name": "heimdall-vscode",
+  "displayName": "Heimdall - C++ Lint and Format",
+  "description": "C++ diagnostics, quick fixes, and formatting powered by Heimdall.",
   "version": "0.2.0",
   "publisher": "gilmar-sales",
   "license": "MIT",
@@ -23,14 +23,14 @@
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "CppLsp",
+      "title": "Heimdall",
       "properties": {
-        "cpplsp.serverPath": {
+        "heimdall.serverPath": {
           "type": "string",
-          "default": "cpplsp-lsp",
-          "description": "Path to the cpplsp-lsp executable. By default it is searched in PATH and common build directories."
+          "default": "heimdall-lsp",
+          "description": "Path to the heimdall-lsp executable. By default it is searched in PATH and common build directories."
         },
-        "cpplsp.trace.server": {
+        "heimdall.trace.server": {
           "type": "string",
           "enum": [
             "off",
@@ -38,14 +38,14 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Trace JSON-RPC traffic between VS Code and cpplsp-lsp."
+          "description": "Trace JSON-RPC traffic between VS Code and heimdall-lsp."
         },
-        "cpplsp.enableSemantic": {
+        "heimdall.enableSemantic": {
           "type": "boolean",
           "default": false,
           "description": "Enable simple local semantic diagnostics using compile_commands.json."
         },
-        "cpplsp.compileCommands": {
+        "heimdall.compileCommands": {
           "type": "string",
           "default": "build/compile_commands.json",
           "description": "Path to compile_commands.json, relative to the first workspace folder unless absolute."

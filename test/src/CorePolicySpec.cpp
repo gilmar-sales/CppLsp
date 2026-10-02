@@ -15,8 +15,8 @@ namespace
 std::vector<fs::path> CoreFiles()
 {
     std::vector<fs::path> out;
-    const fs::path root(CPPLSP_SOURCE_DIR);
-    for (const char* sub : { "include/CppLsp", "core/src" })
+    const fs::path root(HEIMDALL_SOURCE_DIR);
+    for (const char* sub : { "include/Heimdall", "core/src" })
     {
         for (const auto& entry : fs::recursive_directory_iterator(root / sub))
         {
@@ -139,8 +139,8 @@ TEST(CorePolicy, NoThirdPartyQuotedIncludes)
             {
                 continue; // angle <...> include: standard library / platform SDK
             }
-            EXPECT_TRUE(line.compare(quote + 1, 7, "CppLsp/") == 0)
-                << file << ": quoted include outside CppLsp/: " << line;
+            EXPECT_TRUE(line.compare(quote + 1, 9, "Heimdall/") == 0)
+                << file << ": quoted include outside Heimdall/: " << line;
         }
     }
 }

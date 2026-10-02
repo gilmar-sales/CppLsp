@@ -1,4 +1,4 @@
-#include <CppLsp/CompileCommands.hpp>
+#include <Heimdall/CompileCommands.hpp>
 
 #include <simdjson.h>
 #include <Skirnir/Configuration/JsonFileSource.hpp>
@@ -7,7 +7,7 @@
 #include <system_error>
 #include <algorithm>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -211,4 +211,4 @@ const CompileCommand* CompileDatabase::Find(std::filesystem::path file) const
     return nullptr;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

@@ -12,11 +12,11 @@ let client: LanguageClient | undefined;
 let output: vscode.OutputChannel;
 
 function findServer(configuredPath: string, extensionPath: string): string {
-    if (configuredPath && configuredPath !== 'cpplsp-lsp') {
+    if (configuredPath && configuredPath !== 'heimdall-lsp') {
         return configuredPath;
     }
 
-    const executable = process.platform === 'win32' ? 'cpplsp-lsp.exe' : 'cpplsp-lsp';
+    const executable = process.platform === 'win32' ? 'heimdall-lsp.exe' : 'heimdall-lsp';
     const roots = [
         ...(vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),
         path.dirname(extensionPath),
@@ -36,8 +36,8 @@ function findServer(configuredPath: string, extensionPath: string): string {
 }
 
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
-    const configuration = vscode.workspace.getConfiguration('cpplsp');
-    const serverPath = findServer(configuration.get<string>('serverPath', 'cpplsp-lsp'), context.extensionPath);
+    const configuration = vscode.workspace.getConfiguration('heimdall');
+    const serverPath = findServer(configuration.get<string>('serverPath', 'heimdall-lsp'), context.extensionPath);
     const trace = configuration.get<string>('trace.server', 'off');
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const configuredDatabase = configuration.get<string>('compileCommands', 'build/compile_commands.json');
@@ -63,7 +63,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
             { scheme: 'file', language: 'objective-c' },
             { scheme: 'file', language: 'objective-cpp' },
         ],
-        synchronize: { configurationSection: 'cpplsp' },
+        synchronize: { configurationSection: 'heimdall' },
         initializationOptions: {
             enableSemantic: configuration.get<boolean>('enableSemantic', false),
             compileCommands,
@@ -71,7 +71,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         outputChannel: output,
     };
 
-    client = new LanguageClient('cpplsp', 'CppLsp', serverOptions, clientOptions);
+    client = new LanguageClient('heimdall', 'Heimdall', serverOptions, clientOptions);
     client.setTrace(trace === 'verbose' ? Trace.Verbose : trace === 'messages' ? Trace.Messages : Trace.Off);
     context.subscriptions.push(client);
 
@@ -79,21 +79,21 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
         await client.start();
         output.appendLine(`Started ${serverPath}`);
     } catch (error) {
-        const message = `Could not start cpplsp-lsp at '${serverPath}': ${String(error)}`;
+        const message = `Could not start heimdall-lsp at '${serverPath}': ${String(error)}`;
         output.appendLine(message);
         void vscode.window.showErrorMessage(message);
     }
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    output = vscode.window.createOutputChannel('CppLsp');
+    output = vscode.window.createOutputChannel('Heimdall');
     context.subscriptions.push(output);
     await startClient(context);
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
-        if (event.affectsConfiguration('cpplsp.serverPath') ||
-            event.affectsConfiguration('cpplsp.enableSemantic') ||
-            event.affectsConfiguration('cpplsp.compileCommands')) {
+        if (event.affectsConfiguration('heimdall.serverPath') ||
+            event.affectsConfiguration('heimdall.enableSemantic') ||
+            event.affectsConfiguration('heimdall.compileCommands')) {
             await client?.stop();
             client = undefined;
             await startClient(context);

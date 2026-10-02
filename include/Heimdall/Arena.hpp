@@ -4,7 +4,7 @@
 #include <memory_resource>
 #include <utility>
 
-namespace cpplsp
+namespace heimdall
 {
 
 // Monotonic bump arena for CST nodes, tokens and scratch data.
@@ -36,4 +36,4 @@ class Arena
     std::size_t m_used = 0;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

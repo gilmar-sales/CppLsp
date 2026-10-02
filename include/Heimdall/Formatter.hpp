@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace cpplsp
+namespace heimdall
 {
 
 struct FormatOptions
@@ -28,4 +28,4 @@ class Formatter
     FormatOptions m_options;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

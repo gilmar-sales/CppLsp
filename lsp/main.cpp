@@ -1,8 +1,8 @@
-#include <CppLsp/Formatter.hpp>
-#include <CppLsp/Parser.hpp>
-#include <CppLsp/Rules.hpp>
-#include <CppLsp/CompileCommands.hpp>
-#include <CppLsp/Semantic.hpp>
+#include <Heimdall/Formatter.hpp>
+#include <Heimdall/Parser.hpp>
+#include <Heimdall/Rules.hpp>
+#include <Heimdall/CompileCommands.hpp>
+#include <Heimdall/Semantic.hpp>
 
 #include <simdjson.h>
 
@@ -203,7 +203,7 @@ class LanguageServer
                 LoadInitializationOptions(request);
                 Respond(id_json,
                         "{\"capabilities\":{\"textDocumentSync\":1,\"documentFormattingProvider\":true,"
-                        "\"codeActionProvider\":true},\"serverInfo\":{\"name\":\"CppLsp\",\"version\":\"0.1.0\"}}");
+                        "\"codeActionProvider\":true},\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
             }
             else if (method == "initialized")
             {
@@ -259,7 +259,7 @@ class LanguageServer
 
         std::string_view path;
         if (!GetString(options, "compileCommands", path) || path.empty()) return;
-        auto database = cpplsp::CompileDatabase::Load(std::filesystem::path(path));
+        auto database = heimdall::CompileDatabase::Load(std::filesystem::path(path));
         if (!database)
         {
             m_initialization_error = database.error();
@@ -275,19 +275,19 @@ class LanguageServer
 
     void PublishDiagnostics(std::string_view uri, const Document& document)
     {
-        const auto diagnostics = cpplsp::RuleEngine().Analyze(document.text);
+        const auto diagnostics = heimdall::RuleEngine().Analyze(document.text);
         const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
-        cpplsp::ParserOptions parser_options;
+        heimdall::ParserOptions parser_options;
         if (command != nullptr)
         {
             parser_options.standard = command->standard;
             parser_options.predefined_macros = command->defines;
         }
-        const auto parse_tree = cpplsp::ParseTree::Parse(document.text, parser_options);
-        std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
+        const auto parse_tree = heimdall::ParseTree::Parse(document.text, parser_options);
+        std::vector<heimdall::SemanticDiagnostic> semantic_diagnostics;
         if (m_enable_semantic && command != nullptr)
         {
-            semantic_diagnostics = cpplsp::SemanticAnalyzer().AnalyzeUnusedLocals(document.text, command);
+            semantic_diagnostics = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(document.text, command);
         }
         std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
         QuoteJson(uri, message);
@@ -305,7 +305,7 @@ class LanguageServer
             AppendPosition(end, message);
             message += "},\"severity\":2,\"code\":";
             QuoteJson(diagnostic.code, message);
-            message += ",\"source\":\"cpplsp\",\"message\":";
+            message += ",\"source\":\"heimdall\",\"message\":";
             QuoteJson(diagnostic.message, message);
             message += '}';
         }
@@ -321,7 +321,7 @@ class LanguageServer
             AppendPosition(end, message);
             message += "},\"severity\":2,\"code\":";
             QuoteJson(diagnostic.code, message);
-            message += ",\"source\":\"cpplsp\",\"message\":";
+            message += ",\"source\":\"heimdall\",\"message\":";
             QuoteJson(diagnostic.message, message);
             message += '}';
         }
@@ -334,7 +334,7 @@ class LanguageServer
             AppendPosition(start, message);
             message += ",\"end\":";
             AppendPosition(start, message);
-            message += "},\"severity\":1,\"code\":\"CPPLSP900\",\"source\":\"cpplsp\",\"message\":";
+            message += "},\"severity\":1,\"code\":\"HEIMDALL900\",\"source\":\"heimdall\",\"message\":";
             QuoteJson(diagnostic.message, message);
             message += '}';
         }
@@ -426,7 +426,7 @@ class LanguageServer
             Respond(id, "[]");
             return;
         }
-        const std::string formatted = cpplsp::Formatter().Format(found->second.text);
+        const std::string formatted = heimdall::Formatter().Format(found->second.text);
         if (formatted == found->second.text)
         {
             Respond(id, "[]");
@@ -455,7 +455,7 @@ class LanguageServer
             Respond(id, "[]");
             return;
         }
-        const auto diagnostics = cpplsp::RuleEngine().Analyze(found->second.text);
+        const auto diagnostics = heimdall::RuleEngine().Analyze(found->second.text);
         std::string response = "[";
         bool first = true;
         for (const auto& diagnostic : diagnostics)
@@ -480,7 +480,7 @@ class LanguageServer
     }
 
     std::unordered_map<std::string, Document> m_documents;
-    std::optional<cpplsp::CompileDatabase> m_compile_database;
+    std::optional<heimdall::CompileDatabase> m_compile_database;
     bool m_enable_semantic = false;
     std::string m_initialization_error;
 };

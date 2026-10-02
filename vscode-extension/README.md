@@ -1,6 +1,6 @@
-# CppLsp for VS Code
+# Heimdall for VS Code
 
-Independent C/C++ language tooling powered by the CppLsp Language Server. It
+Independent C/C++ language tooling powered by the Heimdall Language Server. It
 provides diagnostics, quick fixes for supported lint rules, and brace-depth
 formatting. It does not currently provide IntelliSense, debugging, build-system
 integration, or full C++ navigation.
@@ -11,15 +11,15 @@ From the repository root:
 
 ```powershell
 cmake -G Ninja -S . -B build
-cmake --build build --target cpplsp-lsp --config Debug
+cmake --build build --target heimdall-lsp --config Debug
 ```
 
 The extension searches `build/` and `build/Debug/` in the opened workspace, then
-falls back to `cpplsp-lsp` on `PATH`. Override the path with the VS Code setting
-`cpplsp.serverPath`.
+falls back to `heimdall-lsp` on `PATH`. Override the path with the VS Code setting
+`heimdall.serverPath`.
 
-Optional local semantic diagnostics can be enabled with `cpplsp.enableSemantic`.
-Set `cpplsp.compileCommands` to the database path (default:
+Optional local semantic diagnostics can be enabled with `heimdall.enableSemantic`.
+Set `heimdall.compileCommands` to the database path (default:
 `build/compile_commands.json`); the extension passes it to the server during
 initialization.
 

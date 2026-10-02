@@ -1,13 +1,13 @@
-#include <CppLsp/LineTable.hpp>
-#include <CppLsp/Lexer.hpp>
-#include <CppLsp/Preprocessor.hpp>
-#include <CppLsp/Rules.hpp>
+#include <Heimdall/LineTable.hpp>
+#include <Heimdall/Lexer.hpp>
+#include <Heimdall/Preprocessor.hpp>
+#include <Heimdall/Rules.hpp>
 
 #include <algorithm>
 #include <string_view>
 #include <utility>
 
-namespace cpplsp
+namespace heimdall
 {
 
 namespace
@@ -53,7 +53,7 @@ std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
             {
                 const auto position = lines.Lookup(token.offset);
                 diagnostics.push_back(MakeDiagnostic(
-                    RuleId::NullMacro, "CPPLSP001", "use nullptr instead of NULL", token.offset, token.length,
+                    RuleId::NullMacro, "HEIMDALL001", "use nullptr instead of NULL", token.offset, token.length,
                     position, { token.offset, token.length, "nullptr" }));
             }
         }
@@ -77,7 +77,7 @@ std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
             {
                 const auto position = lines.Lookup(trim_end);
                 diagnostics.push_back(MakeDiagnostic(
-                    RuleId::TrailingWhitespace, "CPPLSP002", "trailing whitespace", trim_end,
+                    RuleId::TrailingWhitespace, "HEIMDALL002", "trailing whitespace", trim_end,
                     content_end - trim_end, position, { trim_end, content_end - trim_end, "" }));
             }
             line_start = line_end == source.size() ? source.size() : line_end + 1;
@@ -89,7 +89,7 @@ std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
         const auto position = lines.Lookup(source.size());
         const bool crlf = source.find("\r\n") != std::string_view::npos;
         diagnostics.push_back(MakeDiagnostic(
-            RuleId::MissingFinalNewline, "CPPLSP003", "file must end with a newline", source.size(), 0,
+            RuleId::MissingFinalNewline, "HEIMDALL003", "file must end with a newline", source.size(), 0,
             position, { source.size(), 0, crlf ? "\r\n" : "\n" }));
     }
 
@@ -127,4 +127,4 @@ std::string RuleEngine::ApplyFixes(std::string_view source, const std::vector<Di
     return result;
 }
 
-} // namespace cpplsp
+} // namespace heimdall

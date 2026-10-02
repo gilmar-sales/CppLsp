@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace cpplsp
+namespace heimdall
 {
 
 // Read-only view of a file backed by a memory mapping when possible,
@@ -46,4 +46,4 @@ class MappedBuffer
     std::string m_owned;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

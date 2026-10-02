@@ -48,15 +48,15 @@ while stream:
 initialize = next(item for item in responses if item.get("id") == 1)
 assert initialize["result"]["capabilities"]["documentFormattingProvider"] is True
 diagnostics = next(item for item in responses if item.get("method") == "textDocument/publishDiagnostics")
-assert diagnostics["params"]["diagnostics"][0]["code"] == "CPPLSP001"
+assert diagnostics["params"]["diagnostics"][0]["code"] == "HEIMDALL001"
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
 assert formatted[0]["newText"] == "void f(){\n    int value = NULL;\n    int unused;\n}\n"
 codes = {item["code"] for item in diagnostics["params"]["diagnostics"]}
-assert "CPPLSP101" in codes
+assert "HEIMDALL101" in codes
 broken = next(item for item in responses
               if item.get("method") == "textDocument/publishDiagnostics"
               and item["params"]["uri"] == broken_uri)
-assert any(item["code"] == "CPPLSP900" and item["severity"] == 1
+assert any(item["code"] == "HEIMDALL900" and item["severity"] == 1
            for item in broken["params"]["diagnostics"]), broken
 actions = next(item for item in responses if item.get("id") == 3)["result"]
 assert actions[0]["edit"]["changes"][uri][0]["newText"] == "nullptr"

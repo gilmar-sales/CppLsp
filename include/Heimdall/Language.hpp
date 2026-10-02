@@ -2,11 +2,11 @@
 
 #include <cstdint>
 
-namespace cpplsp
+namespace heimdall
 {
 
 // Supported source-language dialects. Separate from the compiler standard
-// required to build CppLsp itself.
+// required to build Heimdall itself.
 enum class CppStandard : std::uint8_t
 {
     Cpp20,
@@ -14,4 +14,4 @@ enum class CppStandard : std::uint8_t
     Cpp26
 };
 
-} // namespace cpplsp
+} // namespace heimdall

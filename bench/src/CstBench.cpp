@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <CppLsp/Buffer.hpp>
-#include <CppLsp/Cst.hpp>
+#include <Heimdall/Buffer.hpp>
+#include <Heimdall/Cst.hpp>
 
 #include <filesystem>
 #include <string>
@@ -14,10 +14,10 @@ void BM_ParseCst(benchmark::State& state)
 {
     std::vector<std::string> sources;
     std::size_t source_bytes = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(CPPLSP_CORPUS_DIR))
+    for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
     {
         if (!entry.is_regular_file()) continue;
-        auto buffer = cpplsp::MappedBuffer::Open(entry.path().string());
+        auto buffer = heimdall::MappedBuffer::Open(entry.path().string());
         if (!buffer)
         {
             state.SkipWithError(buffer.error().c_str());
@@ -38,7 +38,7 @@ void BM_ParseCst(benchmark::State& state)
         node_count = 0;
         for (const auto& source : sources)
         {
-            auto tree = cpplsp::SyntaxTree::Parse(source);
+            auto tree = heimdall::SyntaxTree::Parse(source);
             node_count += tree.Nodes().size();
             benchmark::DoNotOptimize(tree.Nodes().data());
         }

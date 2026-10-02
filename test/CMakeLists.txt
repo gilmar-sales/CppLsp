@@ -15,10 +15,10 @@ file(GLOB_RECURSE TESTS_SRC CONFIGURE_DEPENDS
 
 add_executable(Tests_run ${TESTS_SRC})
 
-target_link_libraries(Tests_run gtest gtest_main cpplsp::core cpplsp::semantic)
+target_link_libraries(Tests_run gtest gtest_main heimdall::core heimdall::semantic)
 target_include_directories(Tests_run PUBLIC ${gtest_SOURCE_DIR}/include ../include)
 
-target_compile_definitions(Tests_run PRIVATE CPPLSP_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 gtest_discover_tests(Tests_run)
 
@@ -27,7 +27,7 @@ target_compile_features(CliSemanticFixture PRIVATE cxx_std_26)
 add_test(
   NAME CliSemanticDetectsUnusedLocal
   COMMAND ${CMAKE_COMMAND}
-          "-DCPPLSP_EXECUTABLE=$<TARGET_FILE:cpplsp>"
+          "-DHEIMDALL_EXECUTABLE=$<TARGET_FILE:heimdall>"
           "-DCOMPILE_COMMANDS_FILE=${PROJECT_BINARY_DIR}/compile_commands.json"
           "-DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckSemanticCli.cmake"
@@ -36,7 +36,7 @@ add_test(
 add_test(
   NAME CliParseReportsSyntaxErrors
   COMMAND ${CMAKE_COMMAND}
-          "-DCPPLSP_EXECUTABLE=$<TARGET_FILE:cpplsp>"
+          "-DHEIMDALL_EXECUTABLE=$<TARGET_FILE:heimdall>"
           "-DGOOD_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
           "-DBAD_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/parse_syntax_error.cpp"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckParseCli.cmake"
@@ -47,7 +47,7 @@ if (Python3_Interpreter_FOUND)
   add_test(
     NAME LspProtocolSmoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/LspProtocolSmoke.py"
-            "$<TARGET_FILE:cpplsp-lsp>" "${PROJECT_BINARY_DIR}/compile_commands.json"
+            "$<TARGET_FILE:heimdall-lsp>" "${PROJECT_BINARY_DIR}/compile_commands.json"
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
   )
 endif ()

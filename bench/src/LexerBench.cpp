@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <CppLsp/Buffer.hpp>
-#include <CppLsp/Lexer.hpp>
+#include <Heimdall/Buffer.hpp>
+#include <Heimdall/Lexer.hpp>
 
 #include <filesystem>
 #include <string>
@@ -14,13 +14,13 @@ void BM_Lex(benchmark::State& state)
 {
     std::vector<std::string> sources;
     std::size_t corpus_bytes = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(CPPLSP_CORPUS_DIR))
+    for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
     {
         if (!entry.is_regular_file())
         {
             continue;
         }
-        auto buffer = cpplsp::MappedBuffer::Open(entry.path().string());
+        auto buffer = heimdall::MappedBuffer::Open(entry.path().string());
         if (!buffer)
         {
             state.SkipWithError(buffer.error().c_str());
@@ -41,7 +41,7 @@ void BM_Lex(benchmark::State& state)
         token_count = 0;
         for (const auto& source : sources)
         {
-            const cpplsp::Lexer lexer(source);
+            const heimdall::Lexer lexer(source);
             const auto tokens = lexer.Lex();
             token_count += tokens.size();
             benchmark::DoNotOptimize(tokens.data());

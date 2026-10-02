@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 enum class TokenKind : std::uint8_t
@@ -45,4 +45,4 @@ class Lexer
     std::string_view m_source;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

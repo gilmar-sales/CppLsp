@@ -11,7 +11,7 @@
 #define MAX_ITEMS 1024
 #define CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : ((v) > (hi) ? (hi) : (v)))
 
-namespace cpplsp::samples
+namespace heimdall::samples
 {
 
 constexpr std::uint32_t kSeed = 0x9E3779B9u;
@@ -36,7 +36,7 @@ constexpr char kPathSep = '\\';
 constexpr char kPathSep = '/';
 #endif
 
-#ifdef CPPLSP_ENABLE_EXTRA
+#ifdef HEIMDALL_ENABLE_EXTRA
 int ExtraFeature();
 #endif
 
@@ -61,4 +61,4 @@ std::vector<Token> Tokenize(std::string_view source)
     return out;
 }
 
-} // namespace cpplsp::samples
+} // namespace heimdall::samples

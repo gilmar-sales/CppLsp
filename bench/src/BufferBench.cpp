@@ -1,6 +1,6 @@
 #include <benchmark/benchmark.h>
 
-#include <CppLsp/Buffer.hpp>
+#include <Heimdall/Buffer.hpp>
 
 #include <filesystem>
 #include <string>
@@ -12,7 +12,7 @@ namespace
 std::vector<std::string> CorpusFiles()
 {
     std::vector<std::string> out;
-    for (const auto& entry : std::filesystem::directory_iterator(CPPLSP_CORPUS_DIR))
+    for (const auto& entry : std::filesystem::directory_iterator(HEIMDALL_CORPUS_DIR))
     {
         if (entry.is_regular_file())
         {
@@ -35,7 +35,7 @@ void BM_MappedBufferOpen(benchmark::State& state)
     {
         for (const auto& file : files)
         {
-            auto buffer = cpplsp::MappedBuffer::Open(file);
+            auto buffer = heimdall::MappedBuffer::Open(file);
             if (!buffer)
             {
                 state.SkipWithError(buffer.error().c_str());

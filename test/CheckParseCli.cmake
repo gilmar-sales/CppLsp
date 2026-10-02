@@ -1,40 +1,40 @@
-# Validates `cpplsp parse` and parser integration in `check`.
-# Variables: CPPLSP_EXECUTABLE, GOOD_FILE, BAD_FILE.
+# Validates `heimdall parse` and parser integration in `check`.
+# Variables: HEIMDALL_EXECUTABLE, GOOD_FILE, BAD_FILE.
 
 execute_process(
-  COMMAND "${CPPLSP_EXECUTABLE}" parse "${GOOD_FILE}"
+  COMMAND "${HEIMDALL_EXECUTABLE}" parse "${GOOD_FILE}"
   RESULT_VARIABLE good_result
   OUTPUT_VARIABLE good_output
   ERROR_VARIABLE good_error
 )
 if (NOT good_result EQUAL 0)
-  message(FATAL_ERROR "expected cpplsp parse on valid file to exit 0; got ${good_result}\nstdout:\n${good_output}\nstderr:\n${good_error}")
+  message(FATAL_ERROR "expected heimdall parse on valid file to exit 0; got ${good_result}\nstdout:\n${good_output}\nstderr:\n${good_error}")
 endif ()
 if (NOT good_output MATCHES "0 syntax errors")
   message(FATAL_ERROR "expected clean parse summary\nstdout:\n${good_output}\nstderr:\n${good_error}")
 endif ()
 
 execute_process(
-  COMMAND "${CPPLSP_EXECUTABLE}" parse "${BAD_FILE}"
+  COMMAND "${HEIMDALL_EXECUTABLE}" parse "${BAD_FILE}"
   RESULT_VARIABLE bad_result
   OUTPUT_VARIABLE bad_output
   ERROR_VARIABLE bad_error
 )
 if (NOT bad_result EQUAL 1)
-  message(FATAL_ERROR "expected cpplsp parse on broken file to exit 1; got ${bad_result}\nstdout:\n${bad_output}\nstderr:\n${bad_error}")
+  message(FATAL_ERROR "expected heimdall parse on broken file to exit 1; got ${bad_result}\nstdout:\n${bad_output}\nstderr:\n${bad_error}")
 endif ()
-if (NOT bad_output MATCHES "CPPLSP900")
-  message(FATAL_ERROR "expected CPPLSP900 syntax diagnostic\nstdout:\n${bad_output}\nstderr:\n${bad_error}")
+if (NOT bad_output MATCHES "HEIMDALL900")
+  message(FATAL_ERROR "expected HEIMDALL900 syntax diagnostic\nstdout:\n${bad_output}\nstderr:\n${bad_error}")
 endif ()
 
 execute_process(
-  COMMAND "${CPPLSP_EXECUTABLE}" parse --json --std c++23 "${BAD_FILE}"
+  COMMAND "${HEIMDALL_EXECUTABLE}" parse --json --std c++23 "${BAD_FILE}"
   RESULT_VARIABLE json_result
   OUTPUT_VARIABLE json_output
   ERROR_VARIABLE json_error
 )
 if (NOT json_result EQUAL 1)
-  message(FATAL_ERROR "expected cpplsp parse --json on broken file to exit 1; got ${json_result}\nstdout:\n${json_output}\nstderr:\n${json_error}")
+  message(FATAL_ERROR "expected heimdall parse --json on broken file to exit 1; got ${json_result}\nstdout:\n${json_output}\nstderr:\n${json_error}")
 endif ()
 if (NOT json_output MATCHES "\"standard\":\"c\\+\\+23\"")
   message(FATAL_ERROR "expected c++23 standard in JSON output\nstdout:\n${json_output}\nstderr:\n${json_error}")
@@ -44,14 +44,14 @@ if (NOT json_output MATCHES "\"kind\":\"FunctionDefinition\"")
 endif ()
 
 execute_process(
-  COMMAND "${CPPLSP_EXECUTABLE}" check "${BAD_FILE}"
+  COMMAND "${HEIMDALL_EXECUTABLE}" check "${BAD_FILE}"
   RESULT_VARIABLE check_result
   OUTPUT_VARIABLE check_output
   ERROR_VARIABLE check_error
 )
 if (NOT check_result EQUAL 1)
-  message(FATAL_ERROR "expected cpplsp check on broken file to exit 1; got ${check_result}\nstdout:\n${check_output}\nstderr:\n${check_error}")
+  message(FATAL_ERROR "expected heimdall check on broken file to exit 1; got ${check_result}\nstdout:\n${check_output}\nstderr:\n${check_error}")
 endif ()
-if (NOT check_output MATCHES "CPPLSP900")
-  message(FATAL_ERROR "expected CPPLSP900 in check output\nstdout:\n${check_output}\nstderr:\n${check_error}")
+if (NOT check_output MATCHES "HEIMDALL900")
+  message(FATAL_ERROR "expected HEIMDALL900 in check output\nstdout:\n${check_output}\nstderr:\n${check_error}")
 endif ()

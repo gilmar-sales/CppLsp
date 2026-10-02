@@ -1,18 +1,18 @@
 #include <gtest/gtest.h>
 
-#include <CppLsp/Cst.hpp>
+#include <Heimdall/Cst.hpp>
 
 #include <string>
 
 TEST(CstSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 {
     constexpr std::string_view source = "int f(int x) { return values[x + (1)]; }\n";
-    const auto tree = cpplsp::SyntaxTree::Parse(source);
+    const auto tree = heimdall::SyntaxTree::Parse(source);
 
     std::string reconstructed;
     for (const auto& token : tree.Tokens()) reconstructed.append(tree.Text(token));
     EXPECT_EQ(reconstructed, source);
-    ASSERT_EQ(tree.Nodes().front().kind, cpplsp::SyntaxKind::TranslationUnit);
+    ASSERT_EQ(tree.Nodes().front().kind, heimdall::SyntaxKind::TranslationUnit);
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
     EXPECT_TRUE(tree.Diagnostics().empty());
 
@@ -21,9 +21,9 @@ TEST(CstSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
     std::size_t braces = 0;
     for (const auto& node : tree.Nodes())
     {
-        parens += node.kind == cpplsp::SyntaxKind::ParenthesizedGroup;
-        brackets += node.kind == cpplsp::SyntaxKind::BracketedGroup;
-        braces += node.kind == cpplsp::SyntaxKind::BracedGroup;
+        parens += node.kind == heimdall::SyntaxKind::ParenthesizedGroup;
+        brackets += node.kind == heimdall::SyntaxKind::BracketedGroup;
+        braces += node.kind == heimdall::SyntaxKind::BracedGroup;
     }
     EXPECT_EQ(parens, 2);
     EXPECT_EQ(brackets, 1);
@@ -33,7 +33,7 @@ TEST(CstSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 TEST(CstSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
 {
     constexpr std::string_view source = "([)] {";
-    const auto tree = cpplsp::SyntaxTree::Parse(source);
+    const auto tree = heimdall::SyntaxTree::Parse(source);
     EXPECT_EQ(tree.Tokens().size(), 6);
     ASSERT_EQ(tree.Diagnostics().size(), 3);
     EXPECT_EQ(tree.Diagnostics()[0].message, "unmatched closing delimiter");
@@ -44,7 +44,7 @@ TEST(CstSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
 
 TEST(CstSpec, EnforcesNestingLimitAndStillProducesTree)
 {
-    const auto tree = cpplsp::SyntaxTree::Parse("((((x))))", 2);
+    const auto tree = heimdall::SyntaxTree::Parse("((((x))))", 2);
     EXPECT_FALSE(tree.Diagnostics().empty());
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
 }
@@ -52,10 +52,10 @@ TEST(CstSpec, EnforcesNestingLimitAndStillProducesTree)
 TEST(CstSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
 {
     constexpr std::string_view source = "int f() { return 0; }";
-    for (const auto standard : { cpplsp::CppStandard::Cpp20, cpplsp::CppStandard::Cpp23,
-                                 cpplsp::CppStandard::Cpp26 })
+    for (const auto standard : { heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,
+                                 heimdall::CppStandard::Cpp26 })
     {
-        const auto tree = cpplsp::SyntaxTree::Parse(source, standard);
+        const auto tree = heimdall::SyntaxTree::Parse(source, standard);
         EXPECT_EQ(tree.Standard(), standard);
         EXPECT_EQ(tree.Source(), source);
         EXPECT_TRUE(tree.Diagnostics().empty());
@@ -63,5 +63,5 @@ TEST(CstSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
 
     // Existing callers remain source-compatible and select the documented
     // default dialect until a compilation database provides one.
-    EXPECT_EQ(cpplsp::SyntaxTree::Parse(source).Standard(), cpplsp::CppStandard::Cpp20);
+    EXPECT_EQ(heimdall::SyntaxTree::Parse(source).Standard(), heimdall::CppStandard::Cpp20);
 }

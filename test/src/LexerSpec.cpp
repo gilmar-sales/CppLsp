@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <CppLsp/Lexer.hpp>
+#include <Heimdall/Lexer.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -11,7 +11,7 @@
 namespace
 {
 
-std::string Reconstruct(std::string_view source, const std::vector<cpplsp::Token>& tokens)
+std::string Reconstruct(std::string_view source, const std::vector<heimdall::Token>& tokens)
 {
     std::string out;
     for (const auto& token : tokens)
@@ -27,7 +27,7 @@ TEST(LexerSpec, RoundTripsEmptyAndOrdinarySourceByteExactly)
 {
     for (const std::string_view source : { "", "int x = 42;\r\n", "//comment\n/* block */\t" })
     {
-        const cpplsp::Lexer lexer(source);
+        const heimdall::Lexer lexer(source);
         const auto tokens = lexer.Lex();
         EXPECT_EQ(Reconstruct(source, tokens), source);
         std::size_t next = 0;
@@ -44,7 +44,7 @@ TEST(LexerSpec, RoundTripsEmptyAndOrdinarySourceByteExactly)
 TEST(LexerSpec, RecognizesTriviaCommentsAndLiteralForms)
 {
     constexpr std::string_view source = "  name // line\n/* block */ \"text\" 'c' R\"tag(raw)tag\" 123 0xAB";
-    const cpplsp::Lexer lexer(source);
+    const heimdall::Lexer lexer(source);
     const auto tokens = lexer.Lex();
     EXPECT_EQ(Reconstruct(source, tokens), source);
 
@@ -58,14 +58,14 @@ TEST(LexerSpec, RecognizesTriviaCommentsAndLiteralForms)
     bool number = false;
     for (const auto& token : tokens)
     {
-        whitespace |= token.kind == cpplsp::TokenKind::Whitespace;
-        identifier |= token.kind == cpplsp::TokenKind::Identifier;
-        line_comment |= token.kind == cpplsp::TokenKind::LineComment;
-        block_comment |= token.kind == cpplsp::TokenKind::BlockComment;
-        string_literal |= token.kind == cpplsp::TokenKind::StringLiteral;
-        character_literal |= token.kind == cpplsp::TokenKind::CharacterLiteral;
-        raw_string |= token.kind == cpplsp::TokenKind::RawStringLiteral;
-        number |= token.kind == cpplsp::TokenKind::Number;
+        whitespace |= token.kind == heimdall::TokenKind::Whitespace;
+        identifier |= token.kind == heimdall::TokenKind::Identifier;
+        line_comment |= token.kind == heimdall::TokenKind::LineComment;
+        block_comment |= token.kind == heimdall::TokenKind::BlockComment;
+        string_literal |= token.kind == heimdall::TokenKind::StringLiteral;
+        character_literal |= token.kind == heimdall::TokenKind::CharacterLiteral;
+        raw_string |= token.kind == heimdall::TokenKind::RawStringLiteral;
+        number |= token.kind == heimdall::TokenKind::Number;
         EXPECT_EQ(lexer.Text(token), source.substr(token.offset, token.length));
     }
     EXPECT_TRUE(whitespace);
@@ -82,7 +82,7 @@ TEST(LexerSpec, UnterminatedConstructsConsumeToEndWithoutLosingBytes)
 {
     for (const std::string_view source : { "\"unterminated", "/* unterminated", "R\"x(raw" })
     {
-        const cpplsp::Lexer lexer(source);
+        const heimdall::Lexer lexer(source);
         const auto tokens = lexer.Lex();
         EXPECT_EQ(Reconstruct(source, tokens), source);
         ASSERT_FALSE(tokens.empty());
@@ -93,12 +93,12 @@ TEST(LexerSpec, UnterminatedConstructsConsumeToEndWithoutLosingBytes)
 TEST(LexerSpec, UsesMaximalMunchForMultiCharacterPunctuators)
 {
     constexpr std::string_view source = "a::b->c == d && e <=> f ... g <<= 1";
-    const cpplsp::Lexer lexer(source);
+    const heimdall::Lexer lexer(source);
     const auto tokens = lexer.Lex();
     std::vector<std::string_view> punctuators;
     for (const auto& token : tokens)
     {
-        if (token.kind == cpplsp::TokenKind::Punctuation) punctuators.push_back(lexer.Text(token));
+        if (token.kind == heimdall::TokenKind::Punctuation) punctuators.push_back(lexer.Text(token));
     }
     EXPECT_EQ(punctuators, (std::vector<std::string_view> { "::", "->", "==", "&&", "<=>", "...", "<<=" }));
     EXPECT_EQ(Reconstruct(source, tokens), source);
@@ -106,7 +106,7 @@ TEST(LexerSpec, UsesMaximalMunchForMultiCharacterPunctuators)
 
 TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
 {
-    const auto corpus = std::filesystem::path(CPPLSP_SOURCE_DIR) / "bench" / "corpus";
+    const auto corpus = std::filesystem::path(HEIMDALL_SOURCE_DIR) / "bench" / "corpus";
     ASSERT_TRUE(std::filesystem::exists(corpus));
     for (const auto& entry : std::filesystem::directory_iterator(corpus))
     {
@@ -116,7 +116,7 @@ TEST(LexerSpec, RoundTripsEveryBenchmarkCorpusFile)
         }
         std::ifstream file(entry.path(), std::ios::binary);
         const std::string source(std::istreambuf_iterator<char>(file), {});
-        const cpplsp::Lexer lexer(source);
+        const heimdall::Lexer lexer(source);
         EXPECT_EQ(Reconstruct(source, lexer.Lex()), source) << entry.path().string();
     }
 }

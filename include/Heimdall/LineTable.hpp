@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cpplsp
+namespace heimdall
 {
 
 // Maps byte offsets to 1-based (line, column) positions.
@@ -27,4 +27,4 @@ class LineTable
     std::vector<std::size_t> m_line_starts;
 };
 
-} // namespace cpplsp
+} // namespace heimdall

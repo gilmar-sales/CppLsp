@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace cpplsp::samples
+namespace heimdall::samples
 {
 
 class Widget;
@@ -68,4 +68,4 @@ template <typename T, typename Alloc = std::allocator<T>> class Ring
     std::size_t m_head = 0;
 };
 
-} // namespace cpplsp::samples
+} // namespace heimdall::samples
