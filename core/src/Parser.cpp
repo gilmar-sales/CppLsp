@@ -737,7 +737,18 @@ class GrammarParser
                     if (!(lone_void && part == open + 1))
                     {
                         const auto parameter = Add(GrammarKind::ParameterDeclaration, part, comma, suffix);
-                        AddTypeAndDeclarator(part, comma, parameter);
+                        const auto consumed = AddTypeAndDeclarator(part, comma, parameter);
+                        // A parameter that stops early while the next one clearly begins
+                        // means the separating comma was forgotten.
+                        if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
+                        {
+                            m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[consumed]].offset,
+                                                             std::string("expected ',' before '") +
+                                                                 std::string(Text(consumed)) + "'" });
+                            SetNodeRange(parameter, part, consumed);
+                            part = consumed;
+                            continue;
+                        }
                     }
                 }
             }
@@ -792,9 +803,9 @@ class GrammarParser
 
     // Parse one declarator (no top-level comma) with full pointer / core / suffix grammar.
     // Creates Declarator node with DeclaredName, PointerOperator, ArraySuffix, FunctionSuffix, etc.
-    void ParseSingleDeclarator(std::size_t begin, std::size_t end, std::size_t parent)
+    std::size_t ParseSingleDeclarator(std::size_t begin, std::size_t end, std::size_t parent)
     {
-        if (begin >= end) return;
+        if (begin >= end) return begin;
         const auto declarator = Add(GrammarKind::Declarator, begin, end, parent);
         auto i = SkipAttributes(begin, end, declarator);
         // Leading pointer operators: `*`, `&`, `&&` with cv-qualifiers and attributes.
@@ -837,7 +848,7 @@ class GrammarParser
             {
                 // Abstract declarator (e.g. lone `void` parameter or `...`): nothing more to parse.
                 SetNodeRange(declarator, begin, core_end);
-                return;
+                return core_end;
             }
         }
         auto tail = core_end;
@@ -889,17 +900,18 @@ class GrammarParser
             tail = end;
         }
         SetNodeRange(declarator, begin, tail);
+        return tail;
     }
 
-    void AddTypeAndDeclarator(std::size_t begin, std::size_t end, std::size_t parent, bool include_type = true)
+    std::size_t AddTypeAndDeclarator(std::size_t begin, std::size_t end, std::size_t parent, bool include_type = true)
     {
         if (begin >= end)
         {
             if (include_type) Add(GrammarKind::TypeSpecifier, begin, end, parent);
-            return;
+            return begin;
         }
         // Ellipsis parameter `...` has no type or name.
-        if (end == begin + 1 && Is(begin, "...")) return;
+        if (end == begin + 1 && Is(begin, "...")) return end;
         // Trailing requires-clause: split `decl requires Constraint` at top level.
         auto declarator_end = end;
         std::size_t trailing_req = Invalid;
@@ -1004,7 +1016,10 @@ class GrammarParser
             }
             else spec_end = begin;
         }
-        if (spec_end < code_end) ParseSingleDeclarator(spec_end, code_end, parent);
+        // Track how far parsing actually advanced so callers can detect leftovers
+        // such as a declaration that lost its terminating semicolon.
+        std::size_t consumed = spec_end > begin ? spec_end : begin;
+        if (spec_end < code_end) consumed = ParseSingleDeclarator(spec_end, code_end, parent);
         else if (spec_end == begin && code_end > begin)
         {
             // Fallback: retain old name-only behavior so counts never regress.
@@ -1013,17 +1028,23 @@ class GrammarParser
             {
                 const auto declarator = Add(GrammarKind::Declarator, name, code_end, parent);
                 Add(GrammarKind::DeclaredName, name, name + 1, declarator);
+                consumed = code_end;
             }
         }
         if (trailing_req != Invalid)
         {
             ParseRequiresConstraint(trailing_req, end, parent);
-            return;
+            return end;
         }
         if (init_pos < end && Is(init_pos, "="))
-            ParseExpression(init_pos + 1, declarator_end == end ? end : declarator_end, parent);
+        {
+            const auto expr_end = ParseExpression(init_pos + 1, declarator_end == end ? end : declarator_end, parent);
+            if (expr_end > consumed) consumed = expr_end;
+        }
         else if (init_pos < end && Is(init_pos, "{") && m_match[init_pos] != Invalid)
-            ParseExpression(init_pos + 1, m_match[init_pos], parent);
+        {
+            if (m_match[init_pos] + 1 > consumed) consumed = m_match[init_pos] + 1;
+        }
         else if (init_pos < end && Is(init_pos, "(") && m_match[init_pos] != Invalid)
         {
             // Direct-list initialization `Type name(args)`: parse args as expressions.
@@ -1036,7 +1057,9 @@ class GrammarParser
                 if (next == close) break;
                 arg = next + 1;
             }
+            if (close + 1 > consumed) consumed = close + 1;
         }
+        return consumed;
     }
 
     void AddDeclarationDetails(std::size_t begin, std::size_t end, std::size_t parent, bool parameter = false)
@@ -1068,21 +1091,45 @@ class GrammarParser
         {
             const auto comma = FindComma(part, end);
             const auto declarator = Add(GrammarKind::InitDeclarator, part, comma, parent);
+            std::size_t consumed = part;
             if (part == body_start && has_shared_type)
             {
                 // First declarator reuses the shared TypeSpecifier node above.
                 const auto code_begin = spec_end;
                 const auto init = TopLevelAssignment(code_begin, comma);
                 const auto code_end = init < comma ? init : comma;
-                if (code_begin < code_end) ParseSingleDeclarator(code_begin, code_end, declarator);
+                if (code_begin < code_end) consumed = ParseSingleDeclarator(code_begin, code_end, declarator);
+                else consumed = code_end;
                 const auto req = FindTopLevelRequires(code_begin, comma);
                 if (req != Invalid && req >= code_begin && !IsRequiresExpressionAt(req, comma))
+                {
                     ParseRequiresConstraint(req, comma, declarator);
-                if (init < comma && Is(init, "=")) ParseExpression(init + 1, comma, declarator);
+                    consumed = comma;
+                }
+                if (init < comma && Is(init, "="))
+                {
+                    const auto expr_end = ParseExpression(init + 1, comma, declarator);
+                    if (expr_end > consumed) consumed = expr_end;
+                }
                 else if (init < comma && Is(init, "{") && m_match[init] != Invalid)
-                    ParseExpression(init + 1, m_match[init], declarator);
+                {
+                    if (m_match[init] + 1 > consumed) consumed = m_match[init] + 1;
+                }
             }
-            else AddTypeAndDeclarator(part, comma, declarator, true);
+            else consumed = AddTypeAndDeclarator(part, comma, declarator, true);
+            // Parsing stopped before the `;`/`,` while a new declaration clearly
+            // begins: the previous member lost its terminating semicolon. Report it
+            // and re-parse the remainder as another declaration so cascading gaps
+            // (two missing semicolons in a row) are all surfaced.
+            if (consumed > part && consumed < comma && LooksLikeDeclarationStart(consumed, comma))
+            {
+                m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[consumed]].offset,
+                                                 std::string("expected ';' before '") +
+                                                     std::string(Text(consumed)) + "'" });
+                SetNodeRange(declarator, part, consumed);
+                part = consumed;
+                continue;
+            }
             if (comma == end) break;
             part = comma + 1;
         }
@@ -1282,6 +1329,9 @@ class GrammarParser
             return pos + 1;
         }
 
+        // `new`/`delete` expressions take a type/operand that must not be mistaken
+        // for the start of the following declaration (e.g. `new int[5]` before `;`).
+        bool operand_pending = first == "new" || first == "delete";
         while (pos < end)
         {
             const auto op = Text(pos);
@@ -1381,6 +1431,44 @@ class GrammarParser
                 SetNodeRange(node, begin, pos);
                 root = node;
                 continue;
+            }
+            // A user-defined literal suffix (`"abc"s`, `1_km`) only counts when it
+            // directly touches the literal; otherwise an identifier here cannot
+            // continue the expression and signals a missing ';'.
+            if (m_tree.m_tokens[m_sig[pos]].kind == TokenKind::Identifier && pos > begin &&
+                (m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::Number ||
+                 m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::StringLiteral ||
+                 m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::CharacterLiteral ||
+                 m_tree.m_tokens[m_sig[pos - 1]].kind == TokenKind::RawStringLiteral))
+            {
+                const auto& previous = m_tree.m_tokens[m_sig[pos - 1]];
+                const auto& current = m_tree.m_tokens[m_sig[pos]];
+                if (current.offset == previous.offset + previous.length)
+                {
+                    ++pos;
+                    continue;
+                }
+            }
+            // C-style cast `(Type) operand` and `new`/`delete` operands: an
+            // expression-start token after the type/keyword continues this
+            // expression rather than starting a new declaration.
+            const bool after_paren =
+                root != Invalid && m_tree.m_nodes[root].kind == GrammarKind::ParenthesizedExpression;
+            const auto token_kind_here = m_tree.m_tokens[m_sig[pos]].kind;
+            const bool operand_start =
+                token_kind_here == TokenKind::Identifier || token_kind_here == TokenKind::Number ||
+                token_kind_here == TokenKind::StringLiteral || token_kind_here == TokenKind::CharacterLiteral ||
+                token_kind_here == TokenKind::RawStringLiteral || Is(pos, "::");
+            if ((after_paren || operand_pending) && operand_start)
+            {
+                const auto operand_end = ParseExpression(pos, end, parent, 14);
+                if (operand_end > pos)
+                {
+                    pos = operand_end;
+                    if (m_last_expression_node != Invalid) root = m_last_expression_node;
+                    operand_pending = false;
+                    continue;
+                }
             }
             const int precedence = Precedence(op);
             if (precedence < minimum || precedence == 0) break;
@@ -1549,7 +1637,21 @@ class GrammarParser
             if (kind == GrammarKind::ReturnStatement) ++expression_begin;
             if (expression_begin < semicolon &&
                 (kind == GrammarKind::ReturnStatement || kind == GrammarKind::ExpressionStatement))
-                ParseExpression(expression_begin, semicolon, node);
+            {
+                const auto expr_end = ParseExpression(expression_begin, semicolon, node);
+                // Tokens left over that look like the next statement mean the `;`
+                // is missing: report it, shrink this node, and resume parsing from
+                // the leftover so the following statement stands on its own.
+                if (expr_end > expression_begin && expr_end < semicolon &&
+                    LooksLikeDeclarationStart(expr_end, semicolon))
+                {
+                    m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[expr_end]].offset,
+                                                     std::string("expected ';' before '") +
+                                                         std::string(Text(expr_end)) + "'" });
+                    SetNodeRange(node, start, expr_end);
+                    pos = expr_end;
+                }
+            }
             if (kind == GrammarKind::DeclarationStatement)
                 AddDeclarationDetails(start, semicolon, node);
             return;
@@ -1606,13 +1708,38 @@ class GrammarParser
                     ++name;
                     name = SkipAttributes(name, stop, enumerator);
                 }
+                // An explicit value ends the enumerator; track the consumed extent
+                // so a missing comma is caught below instead of swallowing the next
+                // enumerator into this one.
+                auto consumed = name;
                 for (auto i = name; i < stop; ++i)
                 {
                     if (Is(i, "="))
                     {
-                        ParseExpression(i + 1, stop, enumerator);
+                        consumed = ParseExpression(i + 1, stop, enumerator);
                         break;
                     }
+                }
+                // Skip trailing attributes without emitting: only an identifier can
+                // start the next enumerator here.
+                auto rest = consumed;
+                while (IsAttributeStart(rest, stop))
+                {
+                    const auto outer_close = m_match[rest];
+                    if (outer_close == Invalid || outer_close >= stop) break;
+                    rest = outer_close + 1;
+                }
+                // Tokens left over that look like another enumerator mean the
+                // separating comma was forgotten: report it, shrink this node,
+                // and re-parse the remainder as its own enumerator.
+                if (rest > pos && rest < stop && IsIdentifierToken(rest))
+                {
+                    m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[rest]].offset,
+                                                     std::string("expected ',' before '") +
+                                                         std::string(Text(rest)) + "'" });
+                    SetNodeRange(enumerator, pos, rest);
+                    pos = rest;
+                    continue;
                 }
             }
             if (comma >= end) break;
@@ -1788,7 +1915,14 @@ class GrammarParser
                 if (function_declaration)
                 {
                     const auto function = Add(GrammarKind::FunctionDeclaration, declaration_start, semi + 1, item_parent);
-                    AddTypeAndDeclarator(declaration_start, semi, function);
+                    const auto consumed = AddTypeAndDeclarator(declaration_start, semi, function);
+                    // The declarator parse stopped short of the `;` while a new
+                    // declaration clearly begins: the function lost its `;`.
+                    if (consumed > declaration_start && consumed < semi &&
+                        LooksLikeDeclarationStart(consumed, semi))
+                        m_tree.m_diagnostics.push_back({ m_tree.m_tokens[m_sig[consumed]].offset,
+                                                         std::string("expected ';' before '") +
+                                                             std::string(Text(consumed)) + "'" });
                 }
                 else
                 {

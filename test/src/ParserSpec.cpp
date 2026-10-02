@@ -268,3 +268,118 @@ TEST(ParserSpec, ParsesEnumDefinitionsWithCommaSeparatedEnumerators)
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 10);
     EXPECT_EQ(Count(tree, cpplsp::GrammarKind::NamespaceDefinition), 1);
 }
+
+TEST(ParserSpec, ReportsMissingSemicolonBetweenStructMembers)
+{
+    constexpr std::string_view source =
+        "struct Options\n"
+        "{\n"
+        "    int standard = 1\n"
+        "    int compile_commands\n"
+        "    int inputs;\n"
+        "};\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 2);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int compile_commands"));
+    EXPECT_EQ(tree.Diagnostics()[1].message, "expected ';' before 'int'");
+    EXPECT_EQ(tree.Diagnostics()[1].offset, source.find("int inputs"));
+    // Shrunk declaration nodes must still be contained in their parents.
+    for (std::size_t i = 1; i < tree.Nodes().size(); ++i)
+    {
+        const auto& node = tree.Nodes()[i];
+        const auto& parent = tree.Nodes()[node.parent];
+        EXPECT_LE(parent.first_token, node.first_token);
+        EXPECT_LE(node.first_token + node.token_count, parent.first_token + parent.token_count);
+    }
+}
+
+TEST(ParserSpec, ReportsMissingSemicolonBetweenLocalDeclarations)
+{
+    constexpr std::string_view source =
+        "int f()\n"
+        "{\n"
+        "    int first = 1\n"
+        "    int second = first;\n"
+        "    return second;\n"
+        "}\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 1);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int second"));
+}
+
+TEST(ParserSpec, ReportsMissingSemicolonBetweenExpressionStatements)
+{
+    constexpr std::string_view source =
+        "void g()\n"
+        "{\n"
+        "    run()\n"
+        "    stop();\n"
+        "}\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 1);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'stop'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("stop"));
+}
+
+TEST(ParserSpec, ReportsMissingCommaBetweenParameters)
+{
+    constexpr std::string_view source = "int sum(int left int right);\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 1);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ',' before 'int'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int right"));
+}
+
+TEST(ParserSpec, ReportsMissingSemicolonAfterFunctionDeclaration)
+{
+    constexpr std::string_view source =
+        "void first()\n"
+        "int second();\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 1);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ';' before 'int'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("int second"));
+}
+
+TEST(ParserSpec, ReportsMissingCommaBetweenEnumerators)
+{
+    constexpr std::string_view source =
+        "enum class Command\n"
+        "{\n"
+        "    Lint,\n"
+        "    Check\n"
+        "    Format,\n"
+        "    Parse\n"
+        "};\n";
+    const auto tree = cpplsp::ParseTree::Parse(source);
+    ASSERT_EQ(tree.Diagnostics().size(), 1);
+    EXPECT_EQ(tree.Diagnostics()[0].message, "expected ',' before 'Format'");
+    EXPECT_EQ(tree.Diagnostics()[0].offset, source.find("Format"));
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::Enumerator), 4);
+    EXPECT_EQ(Count(tree, cpplsp::GrammarKind::DeclaredName), 4);
+}
+
+TEST(ParserSpec, ParsesCastsNewExpressionsAndLiteralFormsWithoutMissingSemicolonNoise)
+{
+    const auto tree = cpplsp::ParseTree::Parse(
+        "struct Scale\n"
+        "{\n"
+        "    int ratio = (int)1.5;\n"
+        "    int* blob = (int*)0;\n"
+        "    void* token = (void*)blob;\n"
+        "    unsigned count = 16u;\n"
+        "    const char* text = \"ab\" \"cd\";\n"
+        "    int* slots = new int[2];\n"
+        "    void paint() const;\n"
+        "    void reset() noexcept;\n"
+        "};\n"
+        "int f()\n"
+        "{\n"
+        "    int ratio = (int)1.5;\n"
+        "    delete[] ratio;\n"
+        "    return ratio;\n"
+        "}\n");
+    EXPECT_TRUE(tree.Diagnostics().empty());
+}
