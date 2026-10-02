@@ -33,8 +33,14 @@ SyntaxKind GroupKind(char opener)
 
 SyntaxTree SyntaxTree::Parse(std::string_view source, std::size_t max_nesting_depth)
 {
+    return Parse(source, CppStandard::Cpp20, max_nesting_depth);
+}
+
+SyntaxTree SyntaxTree::Parse(std::string_view source, CppStandard standard, std::size_t max_nesting_depth)
+{
     SyntaxTree tree;
     tree.m_source = source;
+    tree.m_standard = standard;
     tree.m_tokens = Lexer(source).Lex();
     tree.m_nodes.push_back({ SyntaxKind::TranslationUnit, 0, tree.m_tokens.size(), RootNode });
     tree.m_token_parents.resize(tree.m_tokens.size(), RootNode);

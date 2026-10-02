@@ -35,3 +35,23 @@ TEST(RulesSpec, CanDisableRulesIndependently)
     ASSERT_EQ(diagnostics.size(), 1);
     EXPECT_EQ(diagnostics[0].rule, cpplsp::RuleId::TrailingWhitespace);
 }
+
+TEST(RulesSpec, AddsMissingFinalNewlineAndPreservesLineEndingStyle)
+{
+    const auto lf = cpplsp::RuleEngine().Analyze("int value;");
+    ASSERT_EQ(lf.size(), 1);
+    EXPECT_EQ(lf[0].code, "CPPLSP003");
+    EXPECT_TRUE(lf[0].has_fix);
+    EXPECT_EQ(cpplsp::RuleEngine::ApplyFixes("int value;", lf), "int value;\n");
+
+    const auto crlf = cpplsp::RuleEngine().Analyze("int value;\r\nint other;");
+    ASSERT_EQ(crlf.size(), 1);
+    EXPECT_EQ(cpplsp::RuleEngine::ApplyFixes("int value;\r\nint other;", crlf),
+              "int value;\r\nint other;\r\n");
+}
+
+TEST(RulesSpec, DoesNotFlagEmptyFilesOrFilesAlreadyEndingInNewline)
+{
+    EXPECT_TRUE(cpplsp::RuleEngine().Analyze("").empty());
+    EXPECT_TRUE(cpplsp::RuleEngine().Analyze("int value;\n").empty());
+}

@@ -48,3 +48,20 @@ TEST(CstSpec, EnforcesNestingLimitAndStillProducesTree)
     EXPECT_FALSE(tree.Diagnostics().empty());
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
 }
+
+TEST(CstSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
+{
+    constexpr std::string_view source = "int f() { return 0; }";
+    for (const auto standard : { cpplsp::CppStandard::Cpp20, cpplsp::CppStandard::Cpp23,
+                                 cpplsp::CppStandard::Cpp26 })
+    {
+        const auto tree = cpplsp::SyntaxTree::Parse(source, standard);
+        EXPECT_EQ(tree.Standard(), standard);
+        EXPECT_EQ(tree.Source(), source);
+        EXPECT_TRUE(tree.Diagnostics().empty());
+    }
+
+    // Existing callers remain source-compatible and select the documented
+    // default dialect until a compilation database provides one.
+    EXPECT_EQ(cpplsp::SyntaxTree::Parse(source).Standard(), cpplsp::CppStandard::Cpp20);
+}

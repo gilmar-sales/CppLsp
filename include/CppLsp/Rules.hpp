@@ -18,7 +18,8 @@ enum class Severity : std::uint8_t
 enum class RuleId : std::uint8_t
 {
     NullMacro,
-    TrailingWhitespace
+    TrailingWhitespace,
+    MissingFinalNewline
 };
 
 struct TextEdit
@@ -46,6 +47,7 @@ struct RuleOptions
 {
     bool null_macro = true;
     bool trailing_whitespace = true;
+    bool final_newline = true;
 };
 
 class RuleEngine

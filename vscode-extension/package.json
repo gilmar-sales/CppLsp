@@ -32,7 +32,11 @@
         },
         "cpplsp.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace JSON-RPC traffic between VS Code and cpplsp-lsp."
         },
@@ -52,7 +56,8 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -60,6 +65,7 @@
   "devDependencies": {
     "@types/node": "^20.12.7",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
     "typescript": "^5.4.5"
   }
 }

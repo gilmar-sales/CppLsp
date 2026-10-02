@@ -22,6 +22,7 @@ TEST(CompileCommandsSpec, ReadsArgumentsAndExtractsDefinesUndefinesAndIncludes)
     ASSERT_EQ(database->Commands().size(), 1);
     const auto* command = database->Find(root / "src" / "main.cpp");
     ASSERT_NE(command, nullptr);
+    EXPECT_EQ(command->standard, cpplsp::CppStandard::Cpp26);
     EXPECT_EQ(command->defines.at("DEBUG"), "1");
     EXPECT_EQ(command->defines.at("VALUE"), "1");
     EXPECT_EQ(command->undefines, (std::vector<std::string> { "OLD" }));
@@ -45,6 +46,23 @@ TEST(CompileCommandsSpec, ParsesCommandStringFallback)
     ASSERT_NE(command, nullptr);
     EXPECT_EQ(command->defines.at("VALUE"), "42");
     EXPECT_EQ(command->arguments.size(), 5);
+    EXPECT_EQ(command->standard, cpplsp::CppStandard::Cpp20);
+    std::filesystem::remove(path);
+}
+
+TEST(CompileCommandsSpec, SelectsLatestRecognizedLanguageStandardOption)
+{
+    const auto root = std::filesystem::path(CPPLSP_SOURCE_DIR);
+    const auto path = std::filesystem::temp_directory_path() / "cpplsp_compile_commands_standard_test.json";
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << "[{\"directory\":\"" << root.generic_string()
+            << "\",\"file\":\"src/main.cpp\",\"arguments\":[\"cl\",\"/std:c++20\",\"/std:c++23\"]}]";
+    }
+    auto database = cpplsp::CompileDatabase::Load(path);
+    ASSERT_TRUE(database);
+    ASSERT_EQ(database->Commands().size(), 1);
+    EXPECT_EQ(database->Commands()[0].standard, cpplsp::CppStandard::Cpp23);
     std::filesystem::remove(path);
 }
 

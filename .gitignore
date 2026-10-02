@@ -21,3 +21,4 @@ coverage-report/
 site/
 
 *.pftrace
+*.vsix

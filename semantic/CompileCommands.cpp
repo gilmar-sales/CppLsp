@@ -48,7 +48,25 @@ void ParseOption(CompileCommand& command, std::string_view arg, std::string_view
         command.include_directories.push_back(include.lexically_normal());
     };
 
-    if (arg == "-D" || arg == "/D")
+    auto parse_standard = [&command](std::string_view value) {
+        if (value == "c++23" || value == "gnu++23" || value == "c++2b" || value == "gnu++2b")
+            command.standard = CppStandard::Cpp23;
+        else if (value == "c++26" || value == "gnu++26" || value == "c++2c" || value == "gnu++2c" ||
+                 value == "c++latest")
+            command.standard = CppStandard::Cpp26;
+        else if (value == "c++20" || value == "gnu++20" || value == "c++2a" || value == "gnu++2a")
+            command.standard = CppStandard::Cpp20;
+    };
+
+    if (arg == "-std" && !next.empty())
+    {
+        parse_standard(next);
+        consume_next = true;
+    }
+    else if (arg.starts_with("-std=")) parse_standard(arg.substr(5));
+    else if (arg.starts_with("/std:")) parse_standard(arg.substr(5));
+
+    else if (arg == "-D" || arg == "/D")
     {
         if (!next.empty()) { parse_define(next); consume_next = true; }
     }

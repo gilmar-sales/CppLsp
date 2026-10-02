@@ -1,6 +1,7 @@
 #pragma once
 
 #include <expected>
+#include <CppLsp/Language.hpp>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -18,6 +19,7 @@ struct CompileCommand
     std::unordered_map<std::string, std::string> defines;
     std::vector<std::string> undefines;
     std::vector<std::filesystem::path> include_directories;
+    CppStandard standard = CppStandard::Cpp20;
 };
 
 class CompileDatabase

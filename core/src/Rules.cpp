@@ -84,6 +84,15 @@ std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
         }
     }
 
+    if (m_options.final_newline && !source.empty() && source.back() != '\n')
+    {
+        const auto position = lines.Lookup(source.size());
+        const bool crlf = source.find("\r\n") != std::string_view::npos;
+        diagnostics.push_back(MakeDiagnostic(
+            RuleId::MissingFinalNewline, "CPPLSP003", "file must end with a newline", source.size(), 0,
+            position, { source.size(), 0, crlf ? "\r\n" : "\n" }));
+    }
+
     std::sort(diagnostics.begin(), diagnostics.end(), [](const Diagnostic& a, const Diagnostic& b) {
         return a.offset < b.offset;
     });
