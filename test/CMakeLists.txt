@@ -33,6 +33,15 @@ add_test(
           -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckSemanticCli.cmake"
 )
 
+add_test(
+  NAME CliParseReportsSyntaxErrors
+  COMMAND ${CMAKE_COMMAND}
+          "-DCPPLSP_EXECUTABLE=$<TARGET_FILE:cpplsp>"
+          "-DGOOD_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/semantic_unused.cpp"
+          "-DBAD_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/parse_syntax_error.cpp"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckParseCli.cmake"
+)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
   add_test(

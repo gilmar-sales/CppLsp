@@ -1,6 +1,8 @@
 #include <CppLsp/Buffer.hpp>
 #include <CppLsp/CompileCommands.hpp>
 #include <CppLsp/Formatter.hpp>
+#include <CppLsp/LineTable.hpp>
+#include <CppLsp/Parser.hpp>
 #include <CppLsp/Rules.hpp>
 #include <CppLsp/Semantic.hpp>
 
@@ -25,7 +27,8 @@ enum class Command
 {
     Lint,
     Check,
-    Format
+    Format,
+    Parse
 };
 
 struct Options
@@ -36,8 +39,26 @@ struct Options
     bool write = false;
     bool fix = false;
     bool semantic = false;
+    bool std_override = false;
+    cpplsp::CppStandard standard = cpplsp::CppStandard::Cpp20;
     fs::path compile_commands;
     std::vector<fs::path> inputs;
+};
+
+struct SyntaxDiagnostic
+{
+    std::uint32_t line = 1;
+    std::uint32_t column = 1;
+    std::string code = "CPPLSP900";
+    std::string message;
+};
+
+struct ParseNodeSummary
+{
+    std::string kind;
+    std::size_t parent = 0;
+    std::size_t offset = 0;
+    std::size_t length = 0;
 };
 
 struct FileResult
@@ -46,6 +67,9 @@ struct FileResult
     std::string error;
     std::vector<cpplsp::Diagnostic> diagnostics;
     std::vector<cpplsp::SemanticDiagnostic> semantic_diagnostics;
+    std::vector<SyntaxDiagnostic> syntax_diagnostics;
+    std::vector<ParseNodeSummary> nodes;
+    std::string standard_name = "c++20";
     std::string output;
     bool changed = false;
     bool has_semantic_context = false;
@@ -53,6 +77,132 @@ struct FileResult
     std::size_t declaration_count = 0;
     std::size_t ambiguous_count = 0;
 };
+
+std::string_view GrammarKindName(cpplsp::GrammarKind kind)
+{
+    using cpplsp::GrammarKind;
+    switch (kind)
+    {
+    case GrammarKind::TranslationUnit: return "TranslationUnit";
+    case GrammarKind::PreprocessorDirective: return "PreprocessorDirective";
+    case GrammarKind::Declaration: return "Declaration";
+    case GrammarKind::ParameterDeclaration: return "ParameterDeclaration";
+    case GrammarKind::InitDeclarator: return "InitDeclarator";
+    case GrammarKind::FunctionDefinition: return "FunctionDefinition";
+    case GrammarKind::FunctionDeclaration: return "FunctionDeclaration";
+    case GrammarKind::NamespaceDefinition: return "NamespaceDefinition";
+    case GrammarKind::RecordDefinition: return "RecordDefinition";
+    case GrammarKind::CompoundStatement: return "CompoundStatement";
+    case GrammarKind::DeclarationStatement: return "DeclarationStatement";
+    case GrammarKind::ExpressionStatement: return "ExpressionStatement";
+    case GrammarKind::ReturnStatement: return "ReturnStatement";
+    case GrammarKind::IfStatement: return "IfStatement";
+    case GrammarKind::LoopStatement: return "LoopStatement";
+    case GrammarKind::SwitchStatement: return "SwitchStatement";
+    case GrammarKind::JumpStatement: return "JumpStatement";
+    case GrammarKind::EmptyStatement: return "EmptyStatement";
+    case GrammarKind::IdentifierExpression: return "IdentifierExpression";
+    case GrammarKind::LiteralExpression: return "LiteralExpression";
+    case GrammarKind::ParenthesizedExpression: return "ParenthesizedExpression";
+    case GrammarKind::UnaryExpression: return "UnaryExpression";
+    case GrammarKind::BinaryExpression: return "BinaryExpression";
+    case GrammarKind::ConditionalExpression: return "ConditionalExpression";
+    case GrammarKind::CallExpression: return "CallExpression";
+    case GrammarKind::SubscriptExpression: return "SubscriptExpression";
+    case GrammarKind::MemberExpression: return "MemberExpression";
+    case GrammarKind::LambdaExpression: return "LambdaExpression";
+    case GrammarKind::CaseLabel: return "CaseLabel";
+    case GrammarKind::TryStatement: return "TryStatement";
+    case GrammarKind::DoStatement: return "DoStatement";
+    case GrammarKind::TemplateDeclaration: return "TemplateDeclaration";
+    case GrammarKind::TemplateArgument: return "TemplateArgument";
+    case GrammarKind::TemplateIdExpression: return "TemplateIdExpression";
+    case GrammarKind::TypeSpecifier: return "TypeSpecifier";
+    case GrammarKind::Declarator: return "Declarator";
+    case GrammarKind::DeclaredName: return "DeclaredName";
+    case GrammarKind::PointerOperator: return "PointerOperator";
+    case GrammarKind::NestedNameSpecifier: return "NestedNameSpecifier";
+    case GrammarKind::ArraySuffix: return "ArraySuffix";
+    case GrammarKind::FunctionSuffix: return "FunctionSuffix";
+    case GrammarKind::TrailingReturnType: return "TrailingReturnType";
+    case GrammarKind::NoexceptSpecifier: return "NoexceptSpecifier";
+    case GrammarKind::AttributeSpecifier: return "AttributeSpecifier";
+    case GrammarKind::BitfieldSuffix: return "BitfieldSuffix";
+    case GrammarKind::ModuleDeclaration: return "ModuleDeclaration";
+    case GrammarKind::ImportDeclaration: return "ImportDeclaration";
+    case GrammarKind::UsingDeclaration: return "UsingDeclaration";
+    case GrammarKind::ConceptDefinition: return "ConceptDefinition";
+    case GrammarKind::RequiresClause: return "RequiresClause";
+    case GrammarKind::RequiresExpression: return "RequiresExpression";
+    case GrammarKind::Requirement: return "Requirement";
+    case GrammarKind::ErrorExpression: return "ErrorExpression";
+    case GrammarKind::Error: return "Error";
+    }
+    return "Unknown";
+}
+
+std::string_view StandardName(cpplsp::CppStandard standard)
+{
+    switch (standard)
+    {
+    case cpplsp::CppStandard::Cpp20: return "c++20";
+    case cpplsp::CppStandard::Cpp23: return "c++23";
+    case cpplsp::CppStandard::Cpp26: return "c++26";
+    }
+    return "c++20";
+}
+
+bool ParseStandardValue(std::string_view value, cpplsp::CppStandard& standard)
+{
+    if (value == "c++20" || value == "gnu++20" || value == "c++2a" || value == "gnu++2a")
+    {
+        standard = cpplsp::CppStandard::Cpp20;
+        return true;
+    }
+    if (value == "c++23" || value == "gnu++23" || value == "c++2b" || value == "gnu++2b")
+    {
+        standard = cpplsp::CppStandard::Cpp23;
+        return true;
+    }
+    if (value == "c++26" || value == "gnu++26" || value == "c++2c" || value == "gnu++2c" ||
+        value == "c++latest")
+    {
+        standard = cpplsp::CppStandard::Cpp26;
+        return true;
+    }
+    return false;
+}
+
+cpplsp::ParserOptions ParserOptionsForFile(const fs::path& path, const Options& options,
+                                           const cpplsp::CompileDatabase* database)
+{
+    cpplsp::ParserOptions parser_options;
+    if (options.std_override) parser_options.standard = options.standard;
+    if (database != nullptr)
+    {
+        if (const auto* command = database->Find(path); command != nullptr)
+        {
+            if (!options.std_override) parser_options.standard = command->standard;
+            parser_options.predefined_macros = command->defines;
+        }
+    }
+    return parser_options;
+}
+
+std::vector<SyntaxDiagnostic> ToSyntaxDiagnostics(std::string_view source,
+                                                 const std::vector<cpplsp::GrammarDiagnostic>& grammar)
+{
+    cpplsp::LineTable lines;
+    lines.Build(source);
+    std::vector<SyntaxDiagnostic> out;
+    out.reserve(grammar.size());
+    for (const auto& diagnostic : grammar)
+    {
+        const auto position = lines.Lookup(diagnostic.offset);
+        out.push_back({ position.line, position.column, "CPPLSP900", diagnostic.message });
+    }
+    return out;
+}
 
 bool IsSourceFile(const fs::path& path)
 {
@@ -68,6 +218,7 @@ bool ParseOptions(int argc, char** argv, Options& options)
     if (command == "lint") options.command = Command::Lint;
     else if (command == "check") options.command = Command::Check;
     else if (command == "format") options.command = Command::Format;
+    else if (command == "parse") options.command = Command::Parse;
     else return false;
 
     for (int i = 2; i < argc; ++i)
@@ -78,6 +229,18 @@ bool ParseOptions(int argc, char** argv, Options& options)
         else if (arg == "--fix") options.fix = true;
         else if (arg == "--semantic") options.semantic = true;
         else if (arg == "--compile-commands" && i + 1 < argc) options.compile_commands = argv[++i];
+        else if ((arg == "--std" && i + 1 < argc) ||
+                 (arg.starts_with("--std=") && arg.size() > 6))
+        {
+            const std::string_view value =
+                arg.starts_with("--std=") ? std::string_view(arg).substr(6) : std::string_view(argv[++i]);
+            if (!ParseStandardValue(value, options.standard))
+            {
+                std::cerr << "invalid --std value: " << value << " (expected c++20, c++23 or c++26)\n";
+                return false;
+            }
+            options.std_override = true;
+        }
         else if (arg == "--jobs" && i + 1 < argc)
         {
             const std::string_view value = argv[++i];
@@ -105,9 +268,9 @@ bool ParseOptions(int argc, char** argv, Options& options)
         std::cerr << "no input paths provided\n";
         return false;
     }
-    if (options.json && options.command == Command::Format)
+    if (options.json && (options.command == Command::Format))
     {
-        std::cerr << "--json is only supported by lint/check\n";
+        std::cerr << "--json is only supported by lint/check/parse\n";
         return false;
     }
     if (options.json && options.fix)
@@ -221,6 +384,36 @@ void ProcessFile(const fs::path& path, const Options& options, const cpplsp::Com
         return;
     }
     const std::string_view source = buffer->view();
+    if (options.command == Command::Parse || options.command == Command::Lint ||
+        options.command == Command::Check)
+    {
+        const auto parser_options = ParserOptionsForFile(path, options, database);
+        const auto tree = cpplsp::ParseTree::Parse(source, parser_options);
+        result.standard_name = std::string(StandardName(tree.Standard()));
+        result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree.Diagnostics());
+        if (options.command == Command::Parse)
+        {
+            result.nodes.reserve(tree.Nodes().size());
+            for (const auto& node : tree.Nodes())
+            {
+                std::size_t offset = source.size();
+                std::size_t length = 0;
+                if (node.first_token < tree.Tokens().size() && node.token_count > 0)
+                {
+                    const std::size_t last_index =
+                        std::min(node.first_token + node.token_count, tree.Tokens().size()) - 1;
+                    offset = tree.Tokens()[node.first_token].offset;
+                    const auto& last_token = tree.Tokens()[last_index];
+                    length = last_token.offset + last_token.length - offset;
+                }
+                result.nodes.push_back({ std::string(GrammarKindName(node.kind)),
+                                         node.parent,
+                                         offset,
+                                         length });
+            }
+            return;
+        }
+    }
     if (options.semantic && database != nullptr)
     {
         const auto* command = database->Find(path);
@@ -294,7 +487,7 @@ int main(int argc, char** argv)
     Options options {};
     if (!ParseOptions(argc, argv, options))
     {
-        std::cerr << "usage: cpplsp <lint|check|format> [--jobs N] [--json|--fix|--write] <files-or-directories...>\n";
+        std::cerr << "usage: cpplsp <lint|check|format|parse> [--jobs N] [--json|--fix|--write] [--std <c++20|c++23|c++26>] [--compile-commands <path>] <files-or-directories...>\n";
         return 2;
     }
 
@@ -325,7 +518,49 @@ int main(int argc, char** argv)
 
     bool failed = false;
     bool has_diagnostics = false;
-    if (options.json)
+    const auto severity_name = [](cpplsp::Severity severity) {
+        return severity == cpplsp::Severity::Error ? "error" : "warning";
+    };
+    if (options.command == Command::Parse && options.json)
+    {
+        std::cout << '[';
+        bool first_file = true;
+        for (const auto& result : results)
+        {
+            if (!result.error.empty())
+            {
+                std::cerr << result.path.string() << ": " << result.error << '\n';
+                failed = true;
+                continue;
+            }
+            if (!first_file) std::cout << ',';
+            first_file = false;
+            std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"standard\":\""
+                      << JsonEscape(result.standard_name) << "\",\"nodes\":[";
+            bool first_node = true;
+            for (const auto& node : result.nodes)
+            {
+                if (!first_node) std::cout << ',';
+                first_node = false;
+                std::cout << "{\"kind\":\"" << JsonEscape(node.kind) << "\",\"parent\":" << node.parent
+                          << ",\"offset\":" << node.offset << ",\"length\":" << node.length << '}';
+            }
+            std::cout << "],\"diagnostics\":[";
+            bool first_diag = true;
+            for (const auto& diagnostic : result.syntax_diagnostics)
+            {
+                if (!first_diag) std::cout << ',';
+                first_diag = false;
+                std::cout << "{\"line\":" << diagnostic.line << ",\"column\":" << diagnostic.column
+                          << ",\"severity\":\"error\",\"code\":\"" << JsonEscape(diagnostic.code)
+                          << "\",\"message\":\"" << JsonEscape(diagnostic.message) << "\"}";
+                has_diagnostics = true;
+            }
+            std::cout << "]}";
+        }
+        std::cout << "]\n";
+    }
+    else if (options.json)
     {
         std::cout << '[';
         bool first = true;
@@ -370,8 +605,38 @@ int main(int argc, char** argv)
                           << "\"}";
                 has_diagnostics = true;
             }
+            for (const auto& diagnostic : result.syntax_diagnostics)
+            {
+                if (!first) std::cout << ',';
+                first = false;
+                std::cout << "{\"file\":\"" << JsonEscape(result.path.string()) << "\",\"line\":" << diagnostic.line
+                          << ",\"column\":" << diagnostic.column << ",\"severity\":\"error\",\"code\":\""
+                          << JsonEscape(diagnostic.code) << "\",\"message\":\"" << JsonEscape(diagnostic.message)
+                          << "\"}";
+                has_diagnostics = true;
+            }
         }
         std::cout << "]\n";
+    }
+    else if (options.command == Command::Parse)
+    {
+        for (const auto& result : results)
+        {
+            if (!result.error.empty())
+            {
+                std::cerr << result.path.string() << ": " << result.error << '\n';
+                failed = true;
+                continue;
+            }
+            for (const auto& diagnostic : result.syntax_diagnostics)
+            {
+                std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
+                          << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';
+            }
+            has_diagnostics |= !result.syntax_diagnostics.empty();
+            std::cout << result.path.string() << ": parsed " << result.nodes.size() << " nodes (standard "
+                      << result.standard_name << "): " << result.syntax_diagnostics.size() << " syntax errors\n";
+        }
     }
     else
     {
@@ -416,15 +681,21 @@ int main(int argc, char** argv)
             has_diagnostics |= !result.diagnostics.empty();
             for (const auto& diagnostic : result.diagnostics)
             {
-                std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column << ": warning "
-                          << diagnostic.code << ": " << diagnostic.message << '\n';
+                std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column << ": "
+                          << severity_name(diagnostic.severity) << ' ' << diagnostic.code << ": "
+                          << diagnostic.message << '\n';
             }
             for (const auto& diagnostic : result.semantic_diagnostics)
             {
                 std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
                           << ": warning " << diagnostic.code << ": " << diagnostic.message << '\n';
             }
-            has_diagnostics |= !result.semantic_diagnostics.empty();
+            for (const auto& diagnostic : result.syntax_diagnostics)
+            {
+                std::cout << result.path.string() << ':' << diagnostic.line << ':' << diagnostic.column
+                          << ": error " << diagnostic.code << ": " << diagnostic.message << '\n';
+            }
+            has_diagnostics |= !result.semantic_diagnostics.empty() || !result.syntax_diagnostics.empty();
             if (options.fix && result.changed && !WriteFile(result.path, result.output))
             {
                 std::cerr << result.path.string() << ": failed to write fixes\n";
@@ -434,6 +705,6 @@ int main(int argc, char** argv)
     }
 
     if (failed) return 2;
-    if (options.command == Command::Check && has_diagnostics) return 1;
+    if ((options.command == Command::Check || options.command == Command::Parse) && has_diagnostics) return 1;
     return 0;
 }

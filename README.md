@@ -37,6 +37,8 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ./build/cpplsp check src include
 ./build/cpplsp format src/main.cpp
 ./build/cpplsp format --write src include
+./build/cpplsp parse src/main.cpp
+./build/cpplsp parse --json --std c++23 src/main.cpp
 ./build/cpplsp lint --semantic --compile-commands build/compile_commands.json src
 ```
 
@@ -44,6 +46,13 @@ Files are analyzed concurrently with a standard-library `std::jthread` worker
 set and an atomic work index; results are emitted in sorted path order. The
 current formatter only normalizes brace-depth indentation. `check` exits 1 if
 lint diagnostics are found; I/O or CLI errors exit 2.
+
+`parse` dumps the grammar tree (node kinds with byte offsets) and reports
+syntax errors as `CPPLSP900` diagnostics; it exits 1 when syntax errors are
+found. `lint` and `check` also include `CPPLSP900` syntax diagnostics from the
+same parser. The parser dialect comes from the matching `compile_commands.json`
+entry (`-std=`/`/std:`) and its `-D` macros, defaulting to C++20; an explicit
+`--std <c++20|c++23|c++26>` overrides the database.
 
 ## VS Code extension
 
