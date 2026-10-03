@@ -7,6 +7,7 @@
 #include <Heimdall/ParseTree.hpp>
 #include <Heimdall/RuleEngine.hpp>
 #include <Heimdall/SemanticAnalyzer.hpp>
+#include <Heimdall/Completion.hpp>
 
 #include <filesystem>
 
@@ -36,7 +37,10 @@ bool LanguageServer::Run()
             LoadInitializationOptions(request);
             Respond(id_json,
                     "{\"capabilities\":{\"textDocumentSync\":1,\"documentFormattingProvider\":true,"
-                    "\"codeActionProvider\":true},\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
+                    "\"codeActionProvider\":true,"
+                    "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\"],"
+                    "\"resolveProvider\":false}},"
+                    "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
         }
         else if (method == "initialized")
         {
@@ -68,6 +72,10 @@ bool LanguageServer::Run()
         else if (method == "textDocument/codeAction")
         {
             CodeActions(request, id_json);
+        }
+        else if (method == "textDocument/completion")
+        {
+            CompleteDocument(request, id_json);
         }
         else if (has_id)
         {
@@ -309,6 +317,108 @@ void LanguageServer::CodeActions(simdjson::dom::element request, std::string_vie
         response += "}]}}}";
     }
     response += ']';
+    Respond(id, response);
+}
+
+namespace
+{
+
+int ToLspKind(heimdall::CompletionKind kind)
+{
+    switch (kind)
+    {
+    case heimdall::CompletionKind::Function: return 3;
+    case heimdall::CompletionKind::Variable: return 6;
+    case heimdall::CompletionKind::Type: return 7;
+    case heimdall::CompletionKind::Macro: return 21;
+    case heimdall::CompletionKind::Directive:
+    case heimdall::CompletionKind::Keyword: return 14;
+    }
+    return 14;
+}
+
+std::uint64_t PositionNumber(simdjson::dom::object position, const char* key)
+{
+    std::uint64_t unsigned_value = 0;
+    if (!position[key].get_uint64().get(unsigned_value)) return unsigned_value;
+    std::int64_t signed_value = 0;
+    if (!position[key].get_int64().get(signed_value) && signed_value > 0)
+    {
+        return static_cast<std::uint64_t>(signed_value);
+    }
+    return 0;
+}
+
+} // namespace
+
+void LanguageServer::CompleteDocument(simdjson::dom::element request, std::string_view id)
+{
+    simdjson::dom::object params;
+    if (!GetObject(request, "params", params))
+    {
+        Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
+        return;
+    }
+    simdjson::dom::object text_document;
+    if (!GetObject(params, "textDocument", text_document))
+    {
+        Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
+        return;
+    }
+    std::string_view uri;
+    if (!GetString(text_document, "uri", uri))
+    {
+        Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
+        return;
+    }
+    const auto found = m_documents.find(std::string(uri));
+    if (found == m_documents.end())
+    {
+        Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
+        return;
+    }
+    simdjson::dom::object position;
+    if (!GetObject(params, "position", position))
+    {
+        Respond(id, "{\"isIncomplete\":false,\"items\":[]}");
+        return;
+    }
+    const Position cursor = { static_cast<std::size_t>(PositionNumber(position, "line")),
+                              static_cast<std::size_t>(PositionNumber(position, "character")) };
+    const std::string& text = found->second.text;
+    const std::size_t offset = OffsetFromPosition(text, cursor);
+
+    const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
+    heimdall::ParserOptions parser_options;
+    if (command != nullptr)
+    {
+        parser_options.standard = command->standard;
+        parser_options.predefined_macros = command->defines;
+    }
+    const auto items = heimdall::CompletionEngine::Complete(text, parser_options, offset);
+    const std::string prefix = heimdall::CompletionEngine::PrefixAt(text, offset);
+    const Position start = ToPosition(text, offset - prefix.size());
+    const Position end = ToPosition(text, offset);
+
+    std::string response = "{\"isIncomplete\":false,\"items\":[";
+    bool first = true;
+    for (const auto& item : items)
+    {
+        if (!first) response += ',';
+        first = false;
+        response += "{\"label\":";
+        QuoteJson(item.label, response);
+        response += ",\"kind\":" + std::to_string(ToLspKind(item.kind)) + ",\"detail\":";
+        QuoteJson(item.detail, response);
+        response += ",\"textEdit\":{\"range\":{\"start\":";
+        AppendPosition(start, response);
+        response += ",\"end\":";
+        AppendPosition(end, response);
+        response += "},\"newText\":";
+        QuoteJson(item.label, response);
+        response += "}}";
+    }
+    response += "]}";
     Respond(id, response);
 }
 

@@ -17,7 +17,12 @@ add_executable(Tests_run
   src/PreprocessorSpec.cpp
   src/RuleEngineSpec.cpp
   src/SemanticAnalyzerSpec.cpp
+  src/CompletionSpec.cpp
+  src/DocumentSpec.cpp
+  ../../lsp/Document.cpp
 )
+
+target_include_directories(Tests_run PRIVATE ${PROJECT_SOURCE_DIR}/lsp)
 
 target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic)
 

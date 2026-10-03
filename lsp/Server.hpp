@@ -29,6 +29,7 @@ class LanguageServer
     void CloseDocument(simdjson::dom::element request);
     void FormatDocument(simdjson::dom::element request, std::string_view id);
     void CodeActions(simdjson::dom::element request, std::string_view id);
+    void CompleteDocument(simdjson::dom::element request, std::string_view id);
 
     std::unordered_map<std::string, Document> m_documents;
     std::optional<heimdall::CompileDatabase> m_compile_database;

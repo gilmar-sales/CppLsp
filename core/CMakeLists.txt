@@ -18,6 +18,7 @@ add_library(heimdall_core STATIC
   src/ParseTree.cpp
   src/Preprocessor.cpp
   src/RuleEngine.cpp
+  src/Completion.cpp
 )
 add_library(heimdall::core ALIAS heimdall_core)
 

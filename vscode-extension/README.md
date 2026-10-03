@@ -1,9 +1,10 @@
 # Heimdall for VS Code
 
 Independent C/C++ language tooling powered by the Heimdall Language Server. It
-provides diagnostics, quick fixes for supported lint rules, and brace-depth
-formatting. It does not currently provide IntelliSense, debugging, build-system
-integration, or full C++ navigation.
+provides diagnostics, quick fixes for supported lint rules, brace-depth
+formatting, and word/local-symbol code completion. It does not currently provide
+debugging, build-system integration, or full C++ navigation (member completion
+after `.`/`->` is not yet modeled).
 
 ## Build the server
 

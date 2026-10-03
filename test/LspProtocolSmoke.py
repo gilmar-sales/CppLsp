@@ -23,7 +23,9 @@ messages = [
         "textDocument": {"uri": uri},
         "range": {"start": {"line": 0, "character": 0}, "end": {"line": 2, "character": 0}},
         "context": {"diagnostics": []}}},
-    {"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": {}},
+    {"jsonrpc": "2.0", "id": 4, "method": "textDocument/completion", "params": {
+        "textDocument": {"uri": uri}, "position": {"line": 2, "character": 7}}},
+    {"jsonrpc": "2.0", "id": 5, "method": "shutdown", "params": {}},
     {"jsonrpc": "2.0", "method": "exit"},
 ]
 
@@ -47,6 +49,7 @@ while stream:
 
 initialize = next(item for item in responses if item.get("id") == 1)
 assert initialize["result"]["capabilities"]["documentFormattingProvider"] is True
+assert "completionProvider" in initialize["result"]["capabilities"]
 diagnostics = next(item for item in responses if item.get("method") == "textDocument/publishDiagnostics")
 assert diagnostics["params"]["diagnostics"][0]["code"] == "HEIMDALL001"
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
@@ -60,3 +63,13 @@ assert any(item["code"] == "HEIMDALL900" and item["severity"] == 1
            for item in broken["params"]["diagnostics"]), broken
 actions = next(item for item in responses if item.get("id") == 3)["result"]
 assert actions[0]["edit"]["changes"][uri][0]["newText"] == "nullptr"
+# Line 2 is "int unused;": (2,7) sits after "unu", so "unused" must be offered
+# with a textEdit replacing just the typed prefix.
+completion = next(item for item in responses if item.get("id") == 4)["result"]
+assert completion["isIncomplete"] is False
+labels = [item["label"] for item in completion["items"]]
+assert "unused" in labels, labels
+unused = next(item for item in completion["items"] if item["label"] == "unused")
+assert unused["textEdit"]["range"]["start"] == {"line": 2, "character": 4}
+assert unused["textEdit"]["range"]["end"] == {"line": 2, "character": 7}
+assert unused["textEdit"]["newText"] == "unused"

@@ -22,6 +22,7 @@ struct Document
 };
 
 Position ToPosition(std::string_view text, std::size_t offset);
+std::size_t OffsetFromPosition(std::string_view text, Position position);
 std::filesystem::path PathFromUri(std::string_view uri);
 void AppendPosition(Position position, std::string& out);
 
