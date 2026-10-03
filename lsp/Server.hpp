@@ -15,6 +15,7 @@
 namespace heimdall::lsp
 {
 
+  /* test*/
 class LanguageServer
 {
   public:
@@ -32,6 +33,9 @@ class LanguageServer
     void FormatDocument(simdjson::dom::element request, std::string_view id);
     void CodeActions(simdjson::dom::element request, std::string_view id);
     void CompleteDocument(simdjson::dom::element request, std::string_view id);
+    void HoverDocument(simdjson::dom::element request, std::string_view id);
+    const heimdall::ScopeIndex* HeaderScopes(std::string_view uri, const std::string& text,
+                                            const heimdall::CompileCommand* command);
 
     std::unordered_map<std::string, Document> m_documents;
     std::optional<heimdall::CompileDatabase> m_compile_database;

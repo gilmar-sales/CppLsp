@@ -72,7 +72,9 @@ syntax errors using the file's `compile_commands.json` dialect and macros),
 `NULL` quick fixes, the current
 brace-indent formatter, and scope-aware code completion (visible locals and
 parameters, plus `ns::`, `Type::` and `::global` qualified lookup over the
-current file and its transitively included headers). Set `heimdall.serverPath` if the server is not found in the
+current file and its transitively included headers, with signature details,
+`///`/`/**` documentation popups, and hover information). Known completion gaps and
+their fixes are tracked in `docs/completion-limitations.md`. Set `heimdall.serverPath` if the server is not found in the
 workspace build directory or `PATH`. This replaces the lint/format portion of
 Microsoft's extension; full IntelliSense (member completion after `.`/`->`),
 debugging, and build integration are not implemented yet.

@@ -4,7 +4,8 @@ Independent C/C++ language tooling powered by the Heimdall Language Server. It
 provides diagnostics, quick fixes for supported lint rules, brace-depth
 formatting, and scope-aware code completion (visible locals/parameters plus
 `ns::`, `Type::` and `::global` qualified lookup, including namespaces from
-`#include`d headers such as `std::`). It does not currently provide
+`#include`d headers such as `std::`, with signature details, `///`/`/**`
+documentation popups, and hover information). It does not currently provide
 debugging, build-system integration, or full C++ navigation (member completion
 after `.`/`->` is not yet modeled).
 

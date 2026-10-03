@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -26,7 +27,10 @@ struct CompletionItem
 {
     std::string label;
     CompletionKind kind = CompletionKind::Keyword;
+    // Short signature shown beside the label (`int add(int left, int right)`).
     std::string detail;
+    // Doc comment shown in the side popup (sent as LSP markdown).
+    std::string documentation;
 };
 
 // One named scope and its direct members. `path` is the qualified path from
@@ -62,6 +66,11 @@ class CompletionEngine
     // Structural index of one file: every namespace/record scope (plus the
     // global scope) with its direct members, merged by qualified path.
     static ScopeIndex IndexScopes(std::string_view source, const ParserOptions& options);
+    // Symbol under the cursor for hover: the completion match for the whole
+    // identifier around `offset`, with signature and documentation. Empty when
+    // the cursor is not on a known name (whitespace, punctuation, keywords).
+    static std::optional<CompletionItem> Hover(std::string_view source, const ParserOptions& options,
+                                               std::size_t offset, const ScopeIndex* external = nullptr);
 };
 
 } // namespace heimdall

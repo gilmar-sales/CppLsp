@@ -37,7 +37,7 @@ bool LanguageServer::Run()
             LoadInitializationOptions(request);
             Respond(id_json,
                     "{\"capabilities\":{\"textDocumentSync\":1,\"documentFormattingProvider\":true,"
-                    "\"codeActionProvider\":true,"
+                    "\"codeActionProvider\":true,\"hoverProvider\":true,"
                     "\"completionProvider\":{\"triggerCharacters\":[\".\",\">\",\":\",\"#\"],"
                     "\"resolveProvider\":false}},"
                     "\"serverInfo\":{\"name\":\"Heimdall\",\"version\":\"0.1.0\"}}");
@@ -76,6 +76,10 @@ bool LanguageServer::Run()
         else if (method == "textDocument/completion")
         {
             CompleteDocument(request, id_json);
+        }
+        else if (method == "textDocument/hover")
+        {
+            HoverDocument(request, id_json);
         }
         else if (has_id)
         {
@@ -397,20 +401,9 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
         parser_options.standard = command->standard;
         parser_options.predefined_macros = command->defines;
     }
-    // Include index (headers from disk): rebuilt only when the resolved
-    // header set or flags change; per-keystroke completions reuse the cache.
-    const std::filesystem::path file_path = PathFromUri(uri);
-    const std::filesystem::path base_dir =
-        file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
-    const auto headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, text, command);
-    const std::string index_key = heimdall::IncludeIndex::CacheKey(headers, command);
-    auto& cached = m_include_indices[std::string(uri)];
-    if (cached.first != index_key)
-    {
-        cached = { index_key, heimdall::IncludeIndex::Build(headers, command) };
-    }
+    const heimdall::ScopeIndex* external = HeaderScopes(uri, text, command);
     const auto items =
-        heimdall::CompletionEngine::Complete(text, parser_options, offset, &cached.second.Scopes());
+        heimdall::CompletionEngine::Complete(text, parser_options, offset, external);
     const std::string prefix = heimdall::CompletionEngine::PrefixAt(text, offset);
     const Position start = ToPosition(text, offset - prefix.size());
     const Position end = ToPosition(text, offset);
@@ -425,6 +418,12 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
         QuoteJson(item.label, response);
         response += ",\"kind\":" + std::to_string(ToLspKind(item.kind)) + ",\"detail\":";
         QuoteJson(item.detail, response);
+        if (!item.documentation.empty())
+        {
+            response += ",\"documentation\":{\"kind\":\"markdown\",\"value\":";
+            QuoteJson(item.documentation, response);
+            response += '}';
+        }
         response += ",\"textEdit\":{\"range\":{\"start\":";
         AppendPosition(start, response);
         response += ",\"end\":";
@@ -434,6 +433,92 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
         response += "}}";
     }
     response += "]}";
+    Respond(id, response);
+}
+
+const heimdall::ScopeIndex* LanguageServer::HeaderScopes(std::string_view uri, const std::string& text,
+                                                        const heimdall::CompileCommand* command)
+{
+    // Include index (headers from disk): rebuilt only when the resolved
+    // header set or flags change; per-keystroke requests reuse the cache.
+    const std::filesystem::path file_path = PathFromUri(uri);
+    const std::filesystem::path base_dir =
+        file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
+    const auto headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, text, command);
+    const std::string index_key = heimdall::IncludeIndex::CacheKey(headers, command);
+    auto& cached = m_include_indices[std::string(uri)];
+    if (cached.first != index_key)
+    {
+        cached = { index_key, heimdall::IncludeIndex::Build(headers, command) };
+    }
+    return &cached.second.Scopes();
+}
+
+void LanguageServer::HoverDocument(simdjson::dom::element request, std::string_view id)
+{
+    simdjson::dom::object params;
+    if (!GetObject(request, "params", params))
+    {
+        Respond(id, "null");
+        return;
+    }
+    simdjson::dom::object text_document;
+    if (!GetObject(params, "textDocument", text_document))
+    {
+        Respond(id, "null");
+        return;
+    }
+    std::string_view uri;
+    if (!GetString(text_document, "uri", uri))
+    {
+        Respond(id, "null");
+        return;
+    }
+    const auto found = m_documents.find(std::string(uri));
+    if (found == m_documents.end())
+    {
+        Respond(id, "null");
+        return;
+    }
+    simdjson::dom::object position;
+    if (!GetObject(params, "position", position))
+    {
+        Respond(id, "null");
+        return;
+    }
+    const Position cursor = { static_cast<std::size_t>(PositionNumber(position, "line")),
+                              static_cast<std::size_t>(PositionNumber(position, "character")) };
+    const std::string& text = found->second.text;
+    const std::size_t offset = OffsetFromPosition(text, cursor);
+
+    const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
+    heimdall::ParserOptions parser_options;
+    if (command != nullptr)
+    {
+        parser_options.standard = command->standard;
+        parser_options.predefined_macros = command->defines;
+    }
+    const auto hovered =
+        heimdall::CompletionEngine::Hover(text, parser_options, offset, HeaderScopes(uri, text, command));
+    if (!hovered.has_value())
+    {
+        Respond(id, "null");
+        return;
+    }
+    // One `cpp` line (`int add(int left, int right)`, `unused: int`) plus the
+    // doc comment below, mirroring the CLion-style side popup.
+    std::string line = hovered->label;
+    if (!hovered->detail.empty() && hovered->detail != hovered->label)
+    {
+        line = hovered->detail.find(hovered->label) == std::string::npos
+                   ? hovered->label + ": " + hovered->detail
+                   : hovered->detail;
+    }
+    std::string value = "```cpp\n" + line + "\n```";
+    if (!hovered->documentation.empty()) value += "\n\n" + hovered->documentation;
+    std::string response = "{\"contents\":{\"kind\":\"markdown\",\"value\":";
+    QuoteJson(value, response);
+    response += "}}";
     Respond(id, response);
 }
 

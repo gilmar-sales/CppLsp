@@ -25,7 +25,9 @@ messages = [
         "context": {"diagnostics": []}}},
     {"jsonrpc": "2.0", "id": 4, "method": "textDocument/completion", "params": {
         "textDocument": {"uri": uri}, "position": {"line": 2, "character": 7}}},
-    {"jsonrpc": "2.0", "id": 5, "method": "shutdown", "params": {}},
+    {"jsonrpc": "2.0", "id": 5, "method": "textDocument/hover", "params": {
+        "textDocument": {"uri": uri}, "position": {"line": 2, "character": 6}}},
+    {"jsonrpc": "2.0", "id": 6, "method": "shutdown", "params": {}},
     {"jsonrpc": "2.0", "method": "exit"},
 ]
 
@@ -50,6 +52,7 @@ while stream:
 initialize = next(item for item in responses if item.get("id") == 1)
 assert initialize["result"]["capabilities"]["documentFormattingProvider"] is True
 assert "completionProvider" in initialize["result"]["capabilities"]
+assert initialize["result"]["capabilities"].get("hoverProvider") is True
 diagnostics = next(item for item in responses if item.get("method") == "textDocument/publishDiagnostics")
 assert diagnostics["params"]["diagnostics"][0]["code"] == "HEIMDALL001"
 formatted = next(item for item in responses if item.get("id") == 2)["result"]
@@ -73,3 +76,7 @@ unused = next(item for item in completion["items"] if item["label"] == "unused")
 assert unused["textEdit"]["range"]["start"] == {"line": 2, "character": 4}
 assert unused["textEdit"]["range"]["end"] == {"line": 2, "character": 7}
 assert unused["textEdit"]["newText"] == "unused"
+# Hovering the middle of `unused` shows its type line as markdown.
+hover = next(item for item in responses if item.get("id") == 5)["result"]
+assert hover["contents"]["kind"] == "markdown", hover
+assert "unused: int" in hover["contents"]["value"], hover

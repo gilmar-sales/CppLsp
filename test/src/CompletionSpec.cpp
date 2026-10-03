@@ -421,6 +421,143 @@ TEST(CompletionSpec, ClassifiesTypeAliasesAsTypes)
     EXPECT_EQ(wide->kind, heimdall::CompletionKind::Type);
 }
 
+TEST(CompletionSpec, FunctionDetailShowsSignatureAndDocs)
+{
+    constexpr std::string_view source =
+        "/// Adds two numbers.\n"
+        "/// Returns their sum.\n"
+        "int add(int left, int right) { return left + right; }\n"
+        "int x = ad;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "add");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "int add(int left, int right)");
+    EXPECT_EQ(item->documentation, "Adds two numbers.\nReturns their sum.");
+}
+
+TEST(CompletionSpec, VariableDetailShowsTypeAndDocs)
+{
+    constexpr std::string_view source =
+        "int f() {\n"
+        "  /// The running total.\n"
+        "  long total = 0;\n"
+        "  return tot;\n"
+        "}\n";
+    const std::size_t pos = source.rfind("tot") + 3;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    const auto* item = Find(items, "total");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "long");
+    EXPECT_EQ(item->documentation, "The running total.");
+}
+
+TEST(CompletionSpec, BlankLineBreaksDocAttachment)
+{
+    constexpr std::string_view source =
+        "/// Stale comment.\n"
+        "\n"
+        "int fresh = 1;\n"
+        "int y = fre;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "fresh");
+    ASSERT_NE(item, nullptr);
+    EXPECT_TRUE(item->documentation.empty());
+}
+
+TEST(CompletionSpec, MacroDetailShowsValueAndDocs)
+{
+    constexpr std::string_view source =
+        "/// Maximum buffer size.\n"
+        "#define LIMIT 1024\n"
+        "int x = LIM;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "LIMIT");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "1024");
+    EXPECT_EQ(item->documentation, "Maximum buffer size.");
+}
+
+TEST(CompletionSpec, NamespaceDetailAndDocs)
+{
+    constexpr std::string_view source =
+        "/// Helpful tools.\n"
+        "namespace tools {\n"
+        "int run();\n"
+        "}\n"
+        "int x = tool;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 2);
+    const auto* item = Find(items, "tools");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->kind, heimdall::CompletionKind::Namespace);
+    EXPECT_EQ(item->detail, "namespace tools");
+    EXPECT_EQ(item->documentation, "Helpful tools.");
+}
+
+TEST(CompletionSpec, StructTagDetailAndDocs)
+{
+    constexpr std::string_view source =
+        "/// A small widget.\n"
+        "struct Widget { int value; };\n"
+        "Wid x;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
+    const auto* item = Find(items, "Widget");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "struct Widget");
+    EXPECT_EQ(item->documentation, "A small widget.");
+}
+
+TEST(CompletionSpec, EnumMemberDetailShowsScope)
+{
+    constexpr std::string_view source =
+        "enum class Color { Red, Green };\n"
+        "Color c = Color::R;\n";
+    const std::size_t pos = source.find("Color::R") + 8;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    const auto* item = Find(items, "Red");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "Color::Red");
+}
+
+TEST(CompletionSpec, HoverReturnsSignatureAndDocs)
+{
+    constexpr std::string_view source =
+        "/// Adds two numbers.\n"
+        "int add(int left, int right) { return left + right; }\n"
+        "int x = add(1, 2);\n";
+    // Mid-identifier counts as hovering the symbol.
+    const std::size_t pos = source.rfind("add") + 1;
+    const auto hovered = heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions {}, pos);
+    ASSERT_TRUE(hovered.has_value());
+    EXPECT_EQ(hovered->label, "add");
+    EXPECT_EQ(hovered->detail, "int add(int left, int right)");
+    EXPECT_EQ(hovered->documentation, "Adds two numbers.");
+}
+
+TEST(CompletionSpec, HoverReturnsNullOffSymbol)
+{
+    constexpr std::string_view source = "int value = 1;\n";
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions {}, 3).has_value());
+    EXPECT_FALSE(heimdall::CompletionEngine::Hover(source, heimdall::ParserOptions {}, 0).has_value());
+    // Keywords carry no useful popup.
+    constexpr std::string_view keyword = "int f() { return 0; }\n";
+    EXPECT_FALSE(
+        heimdall::CompletionEngine::Hover(keyword, heimdall::ParserOptions {}, 12).has_value());
+}
+
+TEST(CompletionSpec, TemplateTagDocsAttachAboveTemplateHead)
+{
+    constexpr std::string_view source =
+        "/// A generic box.\n"
+        "template<class T>\n"
+        "struct Box { T value; };\n"
+        "Box x;\n";
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 5);
+    const auto* item = Find(items, "Box");
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(item->detail, "struct Box");
+    EXPECT_EQ(item->documentation, "A generic box.");
+}
+
 TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
 {
     constexpr std::string_view source = "int alpha = 1;\nint alpha = 2;\nint alp";
