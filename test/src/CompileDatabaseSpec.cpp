@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <Heimdall/CompileCommands.hpp>
-#include <Heimdall/Semantic.hpp>
+#include <Heimdall/CompileDatabase.hpp>
 
 #include <filesystem>
 #include <fstream>
 
-TEST(CompileCommandsSpec, ReadsArgumentsAndExtractsDefinesUndefinesAndIncludes)
+TEST(CompileDatabaseSpec, ReadsArgumentsAndExtractsDefinesUndefinesAndIncludes)
 {
     const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
     const auto path = std::filesystem::temp_directory_path() / "heimdall_compile_commands_test.json";
@@ -31,7 +30,7 @@ TEST(CompileCommandsSpec, ReadsArgumentsAndExtractsDefinesUndefinesAndIncludes)
     std::filesystem::remove(path);
 }
 
-TEST(CompileCommandsSpec, ParsesCommandStringFallback)
+TEST(CompileDatabaseSpec, ParsesCommandStringFallback)
 {
     const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
     const auto path = std::filesystem::temp_directory_path() / "heimdall_compile_commands_command_test.json";
@@ -50,7 +49,7 @@ TEST(CompileCommandsSpec, ParsesCommandStringFallback)
     std::filesystem::remove(path);
 }
 
-TEST(CompileCommandsSpec, SelectsLatestRecognizedLanguageStandardOption)
+TEST(CompileDatabaseSpec, SelectsLatestRecognizedLanguageStandardOption)
 {
     const auto root = std::filesystem::path(HEIMDALL_SOURCE_DIR);
     const auto path = std::filesystem::temp_directory_path() / "heimdall_compile_commands_standard_test.json";
@@ -64,49 +63,4 @@ TEST(CompileCommandsSpec, SelectsLatestRecognizedLanguageStandardOption)
     ASSERT_EQ(database->Commands().size(), 1);
     EXPECT_EQ(database->Commands()[0].standard, heimdall::CppStandard::Cpp23);
     std::filesystem::remove(path);
-}
-
-TEST(SemanticSpec, UsesLocalTypeNamesToResolveAsteriskAmbiguity)
-{
-    constexpr std::string_view source = "struct A {};\nusing Alias = A;\n";
-    const heimdall::SemanticAnalyzer analyzer;
-    const auto types = analyzer.CollectTypeNames(source);
-    EXPECT_EQ(analyzer.ClassifyAsteriskStatement("A * b;", types), heimdall::AsteriskMeaning::Declaration);
-    EXPECT_EQ(analyzer.ClassifyAsteriskStatement("unknown * b;", types), heimdall::AsteriskMeaning::Ambiguous);
-    EXPECT_EQ(analyzer.ClassifyAsteriskStatement("value * result;", types, { "value" }),
-              heimdall::AsteriskMeaning::Multiplication);
-    EXPECT_EQ(analyzer.ClassifyAsteriskStatement("int * b;", types), heimdall::AsteriskMeaning::Declaration);
-}
-
-TEST(SemanticSpec, FindsUnusedSimpleLocalsOnlyInsideFunctionBodies)
-{
-    constexpr std::string_view source =
-        "int global_value;\n"
-        "struct Holder { int field; };\n"
-        "void f() {\n"
-        "  int unused = 1;\n"
-        "  int used = 2;\n"
-        "  consume(used);\n"
-        "}\n";
-    const heimdall::SemanticAnalyzer analyzer;
-    const auto diagnostics = analyzer.AnalyzeUnusedLocals(source);
-    ASSERT_EQ(diagnostics.size(), 1);
-    EXPECT_EQ(diagnostics[0].code, "HEIMDALL101");
-    EXPECT_EQ(diagnostics[0].message, "local variable 'unused' is never used");
-    EXPECT_EQ(diagnostics[0].line, 4);
-}
-
-TEST(SemanticSpec, HonorsConditionalBranchesAndCompileCommandDefines)
-{
-    constexpr std::string_view source =
-        "#ifdef FEATURE\n"
-        "void enabled() { int active_unused; }\n"
-        "#else\n"
-        "void disabled() { int inactive_unused; }\n"
-        "#endif\n";
-    heimdall::CompileCommand command;
-    command.defines.emplace("FEATURE", "1");
-    const auto diagnostics = heimdall::SemanticAnalyzer().AnalyzeUnusedLocals(source, &command);
-    ASSERT_EQ(diagnostics.size(), 1);
-    EXPECT_EQ(diagnostics[0].message, "local variable 'active_unused' is never used");
 }

@@ -53,26 +53,9 @@ FetchContent_MakeAvailable(skirnir)
 # and test/src/CorePolicySpec.cpp). Skirnir/simdjson, gtest and Google Benchmark
 # are used only outside core: semantic module, LSP, tests and benches.
 add_subdirectory(core)
-
-add_library(heimdall_semantic STATIC
-  semantic/CompileCommands.cpp
-  semantic/Semantic.cpp
-)
-add_library(heimdall::semantic ALIAS heimdall_semantic)
-target_include_directories(heimdall_semantic PUBLIC
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-target_compile_features(heimdall_semantic PUBLIC cxx_std_26)
-target_link_libraries(heimdall_semantic PUBLIC heimdall::core PRIVATE skirnir::skirnir simdjson::simdjson)
-
-add_executable(heimdall src/cli.cpp)
-target_link_libraries(heimdall PRIVATE heimdall::core heimdall::semantic)
-target_compile_features(heimdall PRIVATE cxx_std_26)
-
-add_executable(heimdall-lsp lsp/main.cpp)
-target_link_libraries(heimdall-lsp PRIVATE heimdall::core heimdall::semantic simdjson::simdjson)
-target_compile_features(heimdall-lsp PRIVATE cxx_std_26)
+add_subdirectory(semantic)
+add_subdirectory(src)
+add_subdirectory(lsp)
 
 if (HEIMDALL_BUILD_TESTS)
   enable_testing()

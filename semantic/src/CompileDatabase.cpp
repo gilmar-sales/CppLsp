@@ -1,4 +1,4 @@
-#include <Heimdall/CompileCommands.hpp>
+#include <Heimdall/CompileDatabase.hpp>
 
 #include <simdjson.h>
 #include <Skirnir/Configuration/JsonFileSource.hpp>

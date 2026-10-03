@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <Heimdall/Buffer.hpp>
-#include <Heimdall/Rules.hpp>
+#include <Heimdall/MappedBuffer.hpp>
+#include <Heimdall/RuleEngine.hpp>
 
 #include <filesystem>
 #include <string>

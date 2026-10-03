@@ -16,7 +16,7 @@ std::vector<fs::path> CoreFiles()
 {
     std::vector<fs::path> out;
     const fs::path root(HEIMDALL_SOURCE_DIR);
-    for (const char* sub : { "include/Heimdall", "core/src" })
+    for (const char* sub : { "core/include/Heimdall", "core/src" })
     {
         for (const auto& entry : fs::recursive_directory_iterator(root / sub))
         {
@@ -142,6 +142,18 @@ TEST(CorePolicy, NoThirdPartyQuotedIncludes)
             EXPECT_TRUE(line.compare(quote + 1, 9, "Heimdall/") == 0)
                 << file << ": quoted include outside Heimdall/: " << line;
         }
+    }
+}
+
+TEST(CorePolicy, NoSemanticHeadersInCore)
+{
+    for (const auto& file : CoreFiles())
+    {
+        const std::string code = StripNoise(ReadFile(file));
+        EXPECT_TRUE(code.find("CompileDatabase.hpp") == std::string::npos)
+            << file << ": core must not include semantic CompileDatabase.hpp";
+        EXPECT_TRUE(code.find("SemanticAnalyzer.hpp") == std::string::npos)
+            << file << ": core must not include semantic SemanticAnalyzer.hpp";
     }
 }
 

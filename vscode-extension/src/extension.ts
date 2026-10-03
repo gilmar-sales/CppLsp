@@ -23,6 +23,7 @@ function findServer(configuredPath: string, extensionPath: string): string {
     ];
     for (const root of [...new Set(roots)]) {
         const candidates = [
+            path.join(root, 'build', 'lsp', executable),
             path.join(root, 'build', executable),
             path.join(root, 'build', 'Debug', executable),
             path.join(root, 'out', 'build', executable),

@@ -1,6 +1,6 @@
 #include <benchmark/benchmark.h>
 
-#include <Heimdall/Buffer.hpp>
+#include <Heimdall/MappedBuffer.hpp>
 
 #include <filesystem>
 #include <string>

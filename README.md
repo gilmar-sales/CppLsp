@@ -31,15 +31,15 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ## CLI
 
 ```bash
-./build/heimdall lint --jobs 8 src include
-./build/heimdall lint --json src/main.cpp
-./build/heimdall lint --fix src/main.cpp
-./build/heimdall check src include
-./build/heimdall format src/main.cpp
-./build/heimdall format --write src include
-./build/heimdall parse src/main.cpp
-./build/heimdall parse --json --std c++23 src/main.cpp
-./build/heimdall lint --semantic --compile-commands build/compile_commands.json src
+./build/src/heimdall lint --jobs 8 src include
+./build/src/heimdall lint --json src/main.cpp
+./build/src/heimdall lint --fix src/main.cpp
+./build/src/heimdall check src include
+./build/src/heimdall format src/main.cpp
+./build/src/heimdall format --write src include
+./build/src/heimdall parse src/main.cpp
+./build/src/heimdall parse --json --std c++23 src/main.cpp
+./build/src/heimdall lint --semantic --compile-commands build/compile_commands.json src
 ```
 
 Files are analyzed concurrently with a standard-library `std::jthread` worker
@@ -78,16 +78,25 @@ implemented yet.
 ## Layout
 
 ```text
-CMakeLists.txt          # root: ccache, FetchContent(Skirnir/simdjson), core + CLI + LSP + tests + benches
-core/                   # heimdall_core: zero-dependency engine (MappedBuffer, Arena, LineTable, Lexer, Preprocessor, CST, rules, formatter)
-include/Heimdall/         # core public headers (STL-only)
-src/cli.cpp             # heimdall lint/check/format CLI
-lsp/main.cpp            # heimdall-lsp: JSON-RPC over stdio
-semantic/               # Skirnir JSON source + compile database reader + local type oracle
+CMakeLists.txt          # root: options, ccache, FetchContent, add_subdirectory(core/semantic/src/lsp/test/bench)
+cmake/pch.hpp           # STL-only precompiled header (no third-party, no Heimdall headers)
+core/                   # heimdall_core: zero-dependency engine (STL only, no exceptions/RTTI)
+  include/Heimdall/     # core public headers (Arena, MappedBuffer, SyntaxTree, Formatter, CppStandard, Lexer, ...)
+  src/                  # one TU per stage + ParseTree.cpp entry; detail/ holds private bridges
+semantic/               # heimdall_semantic: compile DB + local oracle (Skirnir/simdjson PRIVATE)
+  include/Heimdall/     # CompileDatabase.hpp, SemanticAnalyzer.hpp (STL + core only)
+  src/
+src/                    # heimdall CLI: cli.cpp (main) + CliOptions/FileDiscovery/Pipeline/Reporting
+lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modules (simdjson PRIVATE)
 vscode-extension/       # VS Code extension manifest and LSP client
-test/                   # GoogleTest suite, incl. core dependency-policy guard
-bench/                  # Google Benchmark suite (I/O, arena, line table, lexer, preprocessor, CST, rules, formatter) + corpus
+test/                   # GoogleTest suite, incl. core dependency-policy guard (explicit sources)
+bench/                  # Google Benchmark suite (explicit sources) + corpus
 ```
+
+Binaries land in `build/src/heimdall` and `build/lsp/heimdall-lsp`
+(`build/test/Tests_run`, `build/bench/CoreBench`). Close the running
+`heimdall-lsp` (VS Code) before relinking on Windows, or point
+`heimdall.serverPath` at a copy.
 
 ## Implemented core stages
 

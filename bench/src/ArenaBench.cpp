@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
 #include <Heimdall/Arena.hpp>
-#include <Heimdall/Buffer.hpp>
+#include <Heimdall/MappedBuffer.hpp>
 #include <Heimdall/LineTable.hpp>
 
 #include <filesystem>

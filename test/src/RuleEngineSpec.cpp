@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <Heimdall/Rules.hpp>
+#include <Heimdall/RuleEngine.hpp>
 
-TEST(RulesSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
+TEST(RuleEngineSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
 {
     constexpr std::string_view source =
         "#define TEXT NULL\n"
@@ -17,7 +17,7 @@ TEST(RulesSpec, FindsNullMacroOutsideCommentsLiteralsAndDirectives)
               "#define TEXT NULL\nvoid f() { auto p = nullptr; } // NULL\nconst char* s = \"NULL\";\n");
 }
 
-TEST(RulesSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
+TEST(RuleEngineSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
 {
     constexpr std::string_view source = "first  \r\nsecond\t\nclean\n";
     const auto diagnostics = heimdall::RuleEngine().Analyze(source);
@@ -28,7 +28,7 @@ TEST(RulesSpec, FindsAndFixesTrailingSpacesAndTabsIncludingCrLf)
     EXPECT_EQ(heimdall::RuleEngine::ApplyFixes(source, diagnostics), "first\r\nsecond\nclean\n");
 }
 
-TEST(RulesSpec, CanDisableRulesIndependently)
+TEST(RuleEngineSpec, CanDisableRulesIndependently)
 {
     const auto diagnostics = heimdall::RuleEngine({ .null_macro = false, .trailing_whitespace = true })
                                  .Analyze("auto p = NULL;  \n");
@@ -36,7 +36,7 @@ TEST(RulesSpec, CanDisableRulesIndependently)
     EXPECT_EQ(diagnostics[0].rule, heimdall::RuleId::TrailingWhitespace);
 }
 
-TEST(RulesSpec, AddsMissingFinalNewlineAndPreservesLineEndingStyle)
+TEST(RuleEngineSpec, AddsMissingFinalNewlineAndPreservesLineEndingStyle)
 {
     const auto lf = heimdall::RuleEngine().Analyze("int value;");
     ASSERT_EQ(lf.size(), 1);
@@ -50,7 +50,7 @@ TEST(RulesSpec, AddsMissingFinalNewlineAndPreservesLineEndingStyle)
               "int value;\r\nint other;\r\n");
 }
 
-TEST(RulesSpec, DoesNotFlagEmptyFilesOrFilesAlreadyEndingInNewline)
+TEST(RuleEngineSpec, DoesNotFlagEmptyFilesOrFilesAlreadyEndingInNewline)
 {
     EXPECT_TRUE(heimdall::RuleEngine().Analyze("").empty());
     EXPECT_TRUE(heimdall::RuleEngine().Analyze("int value;\n").empty());

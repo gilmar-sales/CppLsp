@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Heimdall/Cst.hpp>
+#include <Heimdall/SyntaxTree.hpp>
 #include <Heimdall/Preprocessor.hpp>
 
 #include <cstddef>
@@ -91,6 +91,12 @@ struct ParserOptions
     Preprocessor::MacroMap predefined_macros;
 };
 
+class ParseTree;
+namespace detail
+{
+void ParseWithGrammar(ParseTree& tree, const PreprocessorResult& preprocessing);
+} // namespace detail
+
 // Initial recursive-descent grammar layer over the lossless lexer. It parses
 // translation-unit items and compound statements while retaining token ranges
 // for declaration/expression forms not yet covered by dedicated productions.
@@ -112,6 +118,7 @@ class ParseTree
 
   private:
     friend class GrammarParser;
+    friend void detail::ParseWithGrammar(ParseTree&, const PreprocessorResult&);
     std::string_view m_source;
     CppStandard m_standard = CppStandard::Cpp20;
     std::vector<Token> m_tokens;

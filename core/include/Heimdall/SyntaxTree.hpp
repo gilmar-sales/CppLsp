@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Heimdall/Lexer.hpp>
-#include <Heimdall/Language.hpp>
+#include <Heimdall/CppStandard.hpp>
 
 #include <cstddef>
 #include <cstdint>

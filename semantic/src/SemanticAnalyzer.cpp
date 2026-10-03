@@ -1,7 +1,7 @@
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/Preprocessor.hpp>
-#include <Heimdall/Semantic.hpp>
+#include <Heimdall/SemanticAnalyzer.hpp>
 
 #include <array>
 #include <string_view>

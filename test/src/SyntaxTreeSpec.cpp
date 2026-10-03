@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <Heimdall/Cst.hpp>
+#include <Heimdall/SyntaxTree.hpp>
 
 #include <string>
 
-TEST(CstSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
+TEST(SyntaxTreeSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
 {
     constexpr std::string_view source = "int f(int x) { return values[x + (1)]; }\n";
     const auto tree = heimdall::SyntaxTree::Parse(source);
@@ -30,7 +30,7 @@ TEST(CstSpec, PreservesSourceAndBuildsNestedDelimiterGroups)
     EXPECT_EQ(braces, 1);
 }
 
-TEST(CstSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
+TEST(SyntaxTreeSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
 {
     constexpr std::string_view source = "([)] {";
     const auto tree = heimdall::SyntaxTree::Parse(source);
@@ -42,14 +42,14 @@ TEST(CstSpec, ReportsMismatchedAndUnclosedDelimitersWithoutAborting)
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
 }
 
-TEST(CstSpec, EnforcesNestingLimitAndStillProducesTree)
+TEST(SyntaxTreeSpec, EnforcesNestingLimitAndStillProducesTree)
 {
     const auto tree = heimdall::SyntaxTree::Parse("((((x))))", 2);
     EXPECT_FALSE(tree.Diagnostics().empty());
     EXPECT_EQ(tree.Nodes().front().token_count, tree.Tokens().size());
 }
 
-TEST(CstSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
+TEST(SyntaxTreeSpec, CarriesExplicitLanguageDialectWithoutChangingSourceSpans)
 {
     constexpr std::string_view source = "int f() { return 0; }";
     for (const auto standard : { heimdall::CppStandard::Cpp20, heimdall::CppStandard::Cpp23,

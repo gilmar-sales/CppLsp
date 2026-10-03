@@ -1,7 +1,7 @@
 #include <Heimdall/LineTable.hpp>
 #include <Heimdall/Lexer.hpp>
 #include <Heimdall/Preprocessor.hpp>
-#include <Heimdall/Rules.hpp>
+#include <Heimdall/RuleEngine.hpp>
 
 #include <algorithm>
 #include <string_view>

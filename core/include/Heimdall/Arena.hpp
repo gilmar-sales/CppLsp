@@ -7,7 +7,7 @@
 namespace heimdall
 {
 
-// Monotonic bump arena for CST nodes, tokens and scratch data.
+// Monotonic bump arena for SyntaxTree nodes, tokens and scratch data.
 // Allocations are never freed individually; Reset() releases everything
 // at once. Not thread-safe by design (one arena per worker thread).
 class Arena

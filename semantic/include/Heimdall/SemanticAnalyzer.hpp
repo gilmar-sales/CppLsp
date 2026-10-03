@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Heimdall/CompileCommands.hpp>
+#include <Heimdall/CompileDatabase.hpp>
 
 #include <cstdint>
 #include <string>

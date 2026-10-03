@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <Heimdall/Buffer.hpp>
-#include <Heimdall/Cst.hpp>
+#include <Heimdall/MappedBuffer.hpp>
+#include <Heimdall/SyntaxTree.hpp>
 
 #include <filesystem>
 #include <string>
@@ -10,7 +10,7 @@
 namespace
 {
 
-void BM_ParseCst(benchmark::State& state)
+void BM_ParseSyntaxTree(benchmark::State& state)
 {
     std::vector<std::string> sources;
     std::size_t source_bytes = 0;
@@ -47,6 +47,6 @@ void BM_ParseCst(benchmark::State& state)
     state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations() * node_count));
 }
 
-BENCHMARK(BM_ParseCst);
+BENCHMARK(BM_ParseSyntaxTree);
 
 } // namespace

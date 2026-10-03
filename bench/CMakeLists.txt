@@ -9,10 +9,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(google-benchmark)
 
-file(GLOB BENCH_SRC CONFIGURE_DEPENDS "src/*.cpp")
-
-add_executable(CoreBench ${BENCH_SRC})
+add_executable(CoreBench
+  src/ArenaBench.cpp
+  src/MappedBufferBench.cpp
+  src/SyntaxTreeBench.cpp
+  src/FormatterBench.cpp
+  src/LexerBench.cpp
+  src/PreprocessorBench.cpp
+  src/RuleEngineBench.cpp
+)
 
 target_link_libraries(CoreBench PRIVATE heimdall::core benchmark::benchmark benchmark::benchmark_main)
 target_compile_definitions(CoreBench PRIVATE HEIMDALL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
 target_compile_features(CoreBench PRIVATE cxx_std_26)
+
+target_precompile_headers(CoreBench PRIVATE
+  ${PROJECT_SOURCE_DIR}/cmake/pch.hpp
+)

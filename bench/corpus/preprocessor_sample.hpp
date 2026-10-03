@@ -2,7 +2,7 @@
 #ifndef HEIMDALL_SAMPLE_CONFIG_HPP
 #define HEIMDALL_SAMPLE_CONFIG_HPP
 
-#include "Heimdall/Buffer.hpp"
+#include "Heimdall/MappedBuffer.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <string>

@@ -1,4 +1,4 @@
-#include <Heimdall/Buffer.hpp>
+#include <Heimdall/MappedBuffer.hpp>
 
 #include <cstdio>
 #include <utility>

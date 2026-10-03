@@ -7,18 +7,25 @@ FetchContent_MakeAvailable(gtest)
 
 include(GoogleTest)
 
-include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
-
-file(GLOB_RECURSE TESTS_SRC CONFIGURE_DEPENDS
-  "src/**.cpp"
+add_executable(Tests_run
+  src/CompileDatabaseSpec.cpp
+  src/CorePolicySpec.cpp
+  src/SyntaxTreeSpec.cpp
+  src/FormatterSpec.cpp
+  src/LexerSpec.cpp
+  src/ParseTreeSpec.cpp
+  src/PreprocessorSpec.cpp
+  src/RuleEngineSpec.cpp
+  src/SemanticAnalyzerSpec.cpp
 )
 
-add_executable(Tests_run ${TESTS_SRC})
-
-target_link_libraries(Tests_run gtest gtest_main heimdall::core heimdall::semantic)
-target_include_directories(Tests_run PUBLIC ${gtest_SOURCE_DIR}/include ../include)
+target_link_libraries(Tests_run PRIVATE gtest gtest_main heimdall::core heimdall::semantic)
 
 target_compile_definitions(Tests_run PRIVATE HEIMDALL_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+target_precompile_headers(Tests_run PRIVATE
+  ${PROJECT_SOURCE_DIR}/cmake/pch.hpp
+)
 
 gtest_discover_tests(Tests_run)
 
