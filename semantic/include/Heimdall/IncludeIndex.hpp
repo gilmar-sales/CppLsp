@@ -36,6 +36,12 @@ class IncludeIndex
                                                              const Limits& limits = Limits {});
     static std::string CacheKey(const std::vector<std::filesystem::path>& headers,
                                 const CompileCommand* command);
+    // Cheap fingerprint of the file's own `#include` lines plus the search
+    // configuration. Lets the LSP skip ResolveHeaders (which stats + reads +
+    // lexes every transitive header) when the including file's include block
+    // did not change: no disk I/O at all on the fast path.
+    static std::string IncludeFingerprint(const std::filesystem::path& base_dir,
+                                          std::string_view text, const CompileCommand* command);
     static IncludeIndex Build(const std::vector<std::filesystem::path>& headers,
                               const CompileCommand* command, const Limits& limits = Limits {});
     static IncludeIndex Build(const std::filesystem::path& base_dir, std::string_view text,

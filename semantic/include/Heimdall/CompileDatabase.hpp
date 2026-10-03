@@ -2,10 +2,10 @@
 
 #include <expected>
 #include <Heimdall/CppStandard.hpp>
+#include <Heimdall/Preprocessor.hpp>
 #include <filesystem>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace heimdall
@@ -16,7 +16,7 @@ struct CompileCommand
     std::filesystem::path directory;
     std::filesystem::path file;
     std::vector<std::string> arguments;
-    std::unordered_map<std::string, std::string> defines;
+    Preprocessor::MacroMap defines;
     std::vector<std::string> undefines;
     std::vector<std::filesystem::path> include_directories;
     // Quoted-include-only directories (-iquote); searched for "..." after the

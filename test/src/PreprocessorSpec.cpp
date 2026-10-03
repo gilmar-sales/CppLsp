@@ -15,7 +15,7 @@ TEST(PreprocessorSpec, KeepsDirectivesOpaqueAndSelectsConditionalBranches)
         "int rejected;\n"
         "#endif\n";
 
-    const auto result = heimdall::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source, true);
     EXPECT_EQ(result.active_source, "int selected = 1;\n");
     ASSERT_EQ(result.directives.size(), 5);
     EXPECT_EQ(result.directives.front().kind, heimdall::DirectiveKind::Include);
@@ -41,14 +41,14 @@ TEST(PreprocessorSpec, SupportsNestedConditionalsAndUndef)
         "undefined_yes\n"
         "#endif\n";
 
-    const auto result = heimdall::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source, true);
     EXPECT_EQ(result.active_source, "outer\ninner_yes\nundefined_yes\n");
     ASSERT_TRUE(result.diagnostics.empty()) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
 }
 
 TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
 {
-    const auto result = heimdall::Preprocessor().Process("#else\n#if 1\nactive\n");
+    const auto result = heimdall::Preprocessor().Process("#else\n#if 1\nactive\n", true);
     EXPECT_EQ(result.diagnostics.size(), 2);
     EXPECT_EQ(result.diagnostics[0].message, "#else without matching #if");
     EXPECT_EQ(result.diagnostics[1].message, "unterminated conditional directive");
@@ -57,7 +57,7 @@ TEST(PreprocessorSpec, ReportsUnmatchedAndUnterminatedConditionals)
 
 TEST(PreprocessorSpec, DoesNotExpandMacrosInsideQuotedLiterals)
 {
-    const auto result = heimdall::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n");
+    const auto result = heimdall::Preprocessor().Process("#define NAME replacement\nconst char* s = \"NAME\"; // NAME\n", true);
     EXPECT_EQ(result.active_source, "const char* s = \"NAME\"; // NAME\n");
 }
 
@@ -70,7 +70,27 @@ TEST(PreprocessorSpec, EvaluatesIntegerComparisonsInIfExpressions)
         "#else\n"
         "rejected\n"
         "#endif\n";
-    const auto result = heimdall::Preprocessor().Process(source);
+    const auto result = heimdall::Preprocessor().Process(source, true);
     EXPECT_EQ(result.active_source, "selected\n");
     EXPECT_TRUE(result.diagnostics.empty());
+}
+
+TEST(PreprocessorSpec, SkipsActiveSourceExpansionByDefault)
+{
+    constexpr std::string_view source = "#define ENABLED 1\nint selected = ENABLED;\n";
+    const auto result = heimdall::Preprocessor().Process(source);
+    EXPECT_TRUE(result.active_source.empty());
+    ASSERT_EQ(result.active_ranges.size(), 1);
+    EXPECT_EQ(source.substr(result.active_ranges.front().offset, result.active_ranges.front().length),
+              "int selected = ENABLED;\n");
+}
+
+TEST(PreprocessorSpec, PredefinedMacrosAreReadWithoutCopying)
+{
+    heimdall::Preprocessor::MacroMap predefined { { "ENABLED", "1" } };
+    constexpr std::string_view source = "#if ENABLED\nselected\n#else\nrejected\n#endif\n";
+    const auto result = heimdall::Preprocessor(predefined).Process(source, true);
+    EXPECT_EQ(result.active_source, "selected\n");
+    // The view must not have taken ownership: the caller's map is untouched.
+    EXPECT_EQ(predefined.size(), 1);
 }

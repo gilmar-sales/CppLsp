@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -150,27 +151,30 @@ bool IsReservedName(std::string_view name)
     return !name.empty() && name.front() == '_';
 }
 
-void MergeScope(ScopeIndex& index, const IndexedScope& scope)
+std::string ScopePathKey(const std::vector<std::string>& path)
 {
-    for (auto& entry : index)
+    std::string key;
+    for (const auto& element : path)
     {
-        if (entry.path == scope.path)
-        {
-            entry.members.insert(entry.members.end(), scope.members.begin(), scope.members.end());
-            return;
-        }
+        key += element;
+        key += '\0';
     }
-    index.push_back(scope);
+    return key;
 }
 
 } // namespace
 
 std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view compiler)
 {
+    // Thread-safe memoization: previously a bare static map (data race as
+    // soon as workers arrive) populated on the I/O thread via popen.
+    static std::mutex mutex;
     static std::unordered_map<std::string, std::vector<std::filesystem::path>> cache;
     const std::string key(compiler.empty() ? "c++" : compiler);
-    const auto found = cache.find(key);
-    if (found != cache.end()) return found->second;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        if (const auto found = cache.find(key); found != cache.end()) return found->second;
+    }
 
     std::vector<std::filesystem::path> dirs;
 #if defined(_WIN32)
@@ -200,7 +204,12 @@ std::vector<std::filesystem::path> IncludeIndex::SystemIncludes(std::string_view
             }
         }
     }
-    cache.emplace(key, dirs);
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        // Another thread may have populated while popen ran outside the lock.
+        if (const auto found = cache.find(key); found != cache.end()) return found->second;
+        cache.emplace(key, dirs);
+    }
     return dirs;
 }
 
@@ -245,6 +254,69 @@ std::vector<std::filesystem::path> IncludeIndex::ResolveHeaders(const std::files
     return ordered;
 }
 
+std::string IncludeIndex::IncludeFingerprint(const std::filesystem::path& base_dir,
+                                               std::string_view text, const CompileCommand* command)
+{
+    // Raw line scan: no lexer, no filesystem access. Only the file's own
+    // include lines matter; nested headers are covered by CacheKey's mtimes.
+    std::string fingerprint;
+    fingerprint += base_dir.string();
+    fingerprint += '\0';
+    std::size_t pos = 0;
+    while (pos < text.size())
+    {
+        std::size_t end = text.find('\n', pos);
+        if (end == std::string_view::npos) end = text.size();
+        std::string_view line = text.substr(pos, end - pos);
+        std::size_t first = 0;
+        while (first < line.size() && (line[first] == ' ' || line[first] == '\t' || line[first] == '\r'))
+            ++first;
+        if (first < line.size() && line[first] == '#')
+        {
+            std::size_t word = first + 1;
+            while (word < line.size() && (line[word] == ' ' || line[word] == '\t')) ++word;
+            const std::size_t word_end = line.find_first_of(" \t\r(", word);
+            const std::string_view directive = line.substr(word, word_end == std::string_view::npos
+                                                                     ? word_end
+                                                                     : word_end - word);
+            if (directive == "include" || directive == "include_next")
+            {
+                fingerprint.append(line);
+                fingerprint += '\n';
+            }
+        }
+        pos = end + 1;
+    }
+    fingerprint += '\0';
+    if (command != nullptr)
+    {
+        fingerprint += std::to_string(static_cast<int>(command->standard));
+        fingerprint += '\0';
+        for (const auto& dir : command->include_directories)
+        {
+            fingerprint += dir.string();
+            fingerprint += '\0';
+        }
+        for (const auto& dir : command->quote_directories)
+        {
+            fingerprint += dir.string();
+            fingerprint += '\0';
+        }
+        std::vector<std::string> defines;
+        for (const auto& [name, value] : command->defines)
+        {
+            defines.push_back(name + "=" + value);
+        }
+        std::sort(defines.begin(), defines.end());
+        for (const auto& define : defines)
+        {
+            fingerprint += define;
+            fingerprint += '\0';
+        }
+    }
+    return fingerprint;
+}
+
 std::string IncludeIndex::CacheKey(const std::vector<std::filesystem::path>& headers,
                                    const CompileCommand* command)
 {
@@ -285,6 +357,10 @@ IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& heade
                                  const CompileCommand* command, const Limits& limits)
 {
     IncludeIndex index;
+    // Path -> position in index.m_scopes: merging is O(1) per scope instead of
+    // the previous linear MergeScope scan (O(S^2) over hundreds of scopes for
+    // <vector>+<string>+<algorithm>).
+    std::unordered_map<std::string, std::size_t> positions;
     ParserOptions options;
     if (command != nullptr)
     {
@@ -318,7 +394,21 @@ IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& heade
                 if (IsReservedName(member.label)) continue;
                 filtered.members.push_back(member);
             }
-            if (!filtered.members.empty()) MergeScope(index.m_scopes, filtered);
+            if (!filtered.members.empty())
+            {
+                const std::string key = ScopePathKey(filtered.path);
+                if (const auto found = positions.find(key); found != positions.end())
+                {
+                    auto& entry = index.m_scopes[found->second];
+                    entry.members.insert(entry.members.end(), filtered.members.begin(),
+                                         filtered.members.end());
+                }
+                else
+                {
+                    positions.emplace(key, index.m_scopes.size());
+                    index.m_scopes.push_back(std::move(filtered));
+                }
+            }
         }
     }
     return index;

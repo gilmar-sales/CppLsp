@@ -17,9 +17,11 @@ namespace heimdall::lsp
 bool LanguageServer::Run()
 {
     std::string body;
+    // Reused across messages: was reconstructed (with its internal buffers)
+    // on every request.
+    simdjson::dom::parser parser;
     while (ReadMessage(body))
     {
-        simdjson::dom::parser parser;
         simdjson::dom::element request;
         if (parser.parse(body).get(request)) continue;
 
@@ -81,6 +83,12 @@ bool LanguageServer::Run()
         {
             HoverDocument(request, id_json);
         }
+        else if (method == "$/cancelRequest")
+        {
+            // No async work to cancel yet (requests run synchronously on the
+            // I/O thread); acknowledge by ignoring so it never falls through
+            // to the generic response branch.
+        }
         else if (has_id)
         {
             Respond(id_json, "null");
@@ -121,13 +129,8 @@ void LanguageServer::PublishDiagnostics(std::string_view uri, const Document& do
 {
     const auto diagnostics = heimdall::RuleEngine().Analyze(document.text);
     const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
-    heimdall::ParserOptions parser_options;
-    if (command != nullptr)
-    {
-        parser_options.standard = command->standard;
-        parser_options.predefined_macros = command->defines;
-    }
-    const auto parse_tree = heimdall::ParseTree::Parse(document.text, parser_options);
+    const std::string uri_string(uri);
+    const auto& parse_tree = CachedParse(uri_string, document, command);
     std::vector<heimdall::SemanticDiagnostic> semantic_diagnostics;
     if (m_enable_semantic && command != nullptr)
     {
@@ -217,6 +220,7 @@ void LanguageServer::OpenDocument(simdjson::dom::element request)
     }
     auto& document = m_documents[std::string(uri)];
     document = { std::string(text), version };
+    m_parse_cache.erase(std::string(uri));
     PublishDiagnostics(uri, document);
 }
 
@@ -241,6 +245,7 @@ void LanguageServer::ChangeDocument(simdjson::dom::element request)
     {
         found->second.version = 0;
     }
+    m_parse_cache.erase(found->first);
     PublishDiagnostics(uri, found->second);
 }
 
@@ -250,7 +255,8 @@ void LanguageServer::CloseDocument(simdjson::dom::element request)
     simdjson::dom::object text_document;
     if (!DocumentParams(request, uri, text_document)) return;
     m_documents.erase(std::string(uri));
-    m_include_indices.erase(std::string(uri));
+    m_include_cache.erase(std::string(uri));
+    m_parse_cache.erase(std::string(uri));
     std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
     QuoteJson(uri, message);
     message += ",\"diagnostics\":[]}}";
@@ -395,15 +401,11 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
     const std::size_t offset = OffsetFromPosition(text, cursor);
 
     const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
-    heimdall::ParserOptions parser_options;
-    if (command != nullptr)
-    {
-        parser_options.standard = command->standard;
-        parser_options.predefined_macros = command->defines;
-    }
+    const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
+    const std::string uri_string(uri);
     const heimdall::ScopeIndex* external = HeaderScopes(uri, text, command);
-    const auto items =
-        heimdall::CompletionEngine::Complete(text, parser_options, offset, external);
+    const auto& tree = CachedParse(uri_string, found->second, command);
+    const auto items = heimdall::CompletionEngine::Complete(tree, parser_options, offset, external);
     const std::string prefix = heimdall::CompletionEngine::PrefixAt(text, offset);
     const Position start = ToPosition(text, offset - prefix.size());
     const Position end = ToPosition(text, offset);
@@ -439,19 +441,76 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
 const heimdall::ScopeIndex* LanguageServer::HeaderScopes(std::string_view uri, const std::string& text,
                                                         const heimdall::CompileCommand* command)
 {
-    // Include index (headers from disk): rebuilt only when the resolved
-    // header set or flags change; per-keystroke requests reuse the cache.
+    // Two-level header cache. The fingerprint covers only the file's own
+    // `#include` block plus search flags: repeat keystrokes hit it with zero
+    // disk I/O (previously every completion/hover re-lexed every transitive
+    // header from disk just to compute the cache key). A fingerprint miss
+    // re-resolves, then re-stats the resolved set; only a real change rebuilds.
+    // Built indexes are shared globally by content key, so the same <vector>
+    // is parsed once across all open documents (was: once per document).
+    const std::string uri_string(uri);
     const std::filesystem::path file_path = PathFromUri(uri);
     const std::filesystem::path base_dir =
         file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
-    const auto headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, text, command);
-    const std::string index_key = heimdall::IncludeIndex::CacheKey(headers, command);
-    auto& cached = m_include_indices[std::string(uri)];
-    if (cached.first != index_key)
+    const std::string fingerprint = heimdall::IncludeIndex::IncludeFingerprint(base_dir, text, command);
+
+    auto& entry = m_include_cache[uri_string];
+    if (entry.fingerprint != fingerprint)
     {
-        cached = { index_key, heimdall::IncludeIndex::Build(headers, command) };
+        entry.fingerprint = fingerprint;
+        entry.headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, text, command);
+        entry.index_key.clear(); // force CacheKey recomputation below
     }
-    return &cached.second.Scopes();
+    const std::string index_key = heimdall::IncludeIndex::CacheKey(entry.headers, command);
+    if (entry.index_key != index_key)
+    {
+        entry.index_key = index_key;
+        auto global = m_global_indices.find(index_key);
+        if (global == m_global_indices.end())
+        {
+            global = m_global_indices.emplace(index_key, heimdall::IncludeIndex::Build(entry.headers,
+                                                                                       command)).first;
+        }
+        return &global->second.Scopes();
+    }
+    // Fast path: return the shared index without touching the disk.
+    if (const auto global = m_global_indices.find(entry.index_key); global != m_global_indices.end())
+    {
+        return &global->second.Scopes();
+    }
+    // The global entry was evicted (never happens today: no eviction) or the
+    // cache started empty: (re)build under the content key.
+    auto global = m_global_indices.emplace(entry.index_key, heimdall::IncludeIndex::Build(entry.headers,
+                                                                                           command)).first;
+    return &global->second.Scopes();
+}
+
+heimdall::ParserOptions LanguageServer::ParserOptionsFor(const heimdall::CompileCommand* command)
+{
+    heimdall::ParserOptions options;
+    if (command != nullptr)
+    {
+        options.standard = command->standard;
+        options.predefined_macros = command->defines;
+    }
+    return options;
+}
+
+const heimdall::ParseTree& LanguageServer::CachedParse(const std::string& uri, const Document& document,
+                                                        const heimdall::CompileCommand* command)
+{
+    auto& entry = m_parse_cache[uri];
+    // The tree borrows the document buffer: reuse only when the version
+    // matches and the buffer is still the one the tree was parsed from.
+    if (entry.version == document.version && entry.tree.Source().data() == document.text.data() &&
+        entry.tree.Source().size() == document.text.size())
+    {
+        return entry.tree;
+    }
+    entry.version = document.version;
+    entry.options = ParserOptionsFor(command);
+    entry.tree = heimdall::ParseTree::Parse(document.text, entry.options);
+    return entry.tree;
 }
 
 void LanguageServer::HoverDocument(simdjson::dom::element request, std::string_view id)
@@ -492,14 +551,11 @@ void LanguageServer::HoverDocument(simdjson::dom::element request, std::string_v
     const std::size_t offset = OffsetFromPosition(text, cursor);
 
     const auto* command = m_compile_database ? m_compile_database->Find(PathFromUri(uri)) : nullptr;
-    heimdall::ParserOptions parser_options;
-    if (command != nullptr)
-    {
-        parser_options.standard = command->standard;
-        parser_options.predefined_macros = command->defines;
-    }
-    const auto hovered =
-        heimdall::CompletionEngine::Hover(text, parser_options, offset, HeaderScopes(uri, text, command));
+    const heimdall::ParserOptions parser_options = ParserOptionsFor(command);
+    const std::string uri_string(uri);
+    const auto& tree = CachedParse(uri_string, found->second, command);
+    const auto hovered = heimdall::CompletionEngine::Hover(tree, parser_options, offset,
+                                                           HeaderScopes(uri, text, command));
     if (!hovered.has_value())
     {
         Respond(id, "null");

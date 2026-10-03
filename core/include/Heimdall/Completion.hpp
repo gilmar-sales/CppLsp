@@ -63,6 +63,12 @@ class CompletionEngine
     // external global-scope members. May be nullptr for single-file lookup.
     static std::vector<CompletionItem> Complete(std::string_view source, const ParserOptions& options,
                                                 std::size_t offset, const ScopeIndex* external);
+    // ParseTree-backed overloads: the server caches one ParseTree per
+    // (uri, version) and reuses it across diagnostics/completion/hover so a
+    // keystroke pays for a single lex + preprocess + grammar pass. The tree
+    // must have been parsed from a buffer that outlives the call.
+    static std::vector<CompletionItem> Complete(const ParseTree& tree, const ParserOptions& options,
+                                                std::size_t offset, const ScopeIndex* external = nullptr);
     // Structural index of one file: every namespace/record scope (plus the
     // global scope) with its direct members, merged by qualified path.
     static ScopeIndex IndexScopes(std::string_view source, const ParserOptions& options);
@@ -70,6 +76,8 @@ class CompletionEngine
     // identifier around `offset`, with signature and documentation. Empty when
     // the cursor is not on a known name (whitespace, punctuation, keywords).
     static std::optional<CompletionItem> Hover(std::string_view source, const ParserOptions& options,
+                                               std::size_t offset, const ScopeIndex* external = nullptr);
+    static std::optional<CompletionItem> Hover(const ParseTree& tree, const ParserOptions& options,
                                                std::size_t offset, const ScopeIndex* external = nullptr);
 };
 

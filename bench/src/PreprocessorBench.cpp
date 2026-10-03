@@ -39,7 +39,7 @@ void BM_Preprocess(benchmark::State& state)
         output_bytes = 0;
         for (const auto& source : sources)
         {
-            auto result = preprocessor.Process(source);
+            auto result = preprocessor.Process(source, true);
             output_bytes += result.active_source.size();
             benchmark::DoNotOptimize(result.active_source.data());
         }

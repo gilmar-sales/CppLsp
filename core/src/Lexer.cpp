@@ -31,6 +31,13 @@ std::size_t ScanQuoted(std::string_view s, std::size_t i, char quote)
     ++i;
     while (i < s.size())
     {
+        // An unterminated quote must not swallow the rest of the file while
+        // the user is typing: stop at the line break like clang/rustc do.
+        // A `\` + newline continuation was already consumed as an escape
+        // above, so a raw newline here always terminates the literal.
+        // The newline itself starts the next (whitespace) token, keeping the
+        // lexer lossless.
+        if (s[i] == '\n' || s[i] == '\r') break;
         if (s[i] == '\\')
         {
             i += i + 1 < s.size() ? 2 : 1;
@@ -115,7 +122,9 @@ std::size_t PunctuatorLength(std::string_view source, std::size_t offset)
 std::vector<Token> Lexer::Lex() const
 {
     std::vector<Token> tokens;
-    tokens.reserve(m_source.size() / 3 + 1);
+    // ~1 token per 4 source bytes on typical C++ (was size/3: over-reserved
+    // ~8 B of Token storage per source byte up front).
+    tokens.reserve(m_source.size() / 4 + 1);
 
     std::size_t i = 0;
     while (i < m_source.size())

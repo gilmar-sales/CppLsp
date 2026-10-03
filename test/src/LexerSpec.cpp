@@ -78,6 +78,34 @@ TEST(LexerSpec, RecognizesTriviaCommentsAndLiteralForms)
     EXPECT_TRUE(number);
 }
 
+TEST(LexerSpec, UnterminatedStringStopsAtNewline)
+{
+    // While the user types `foo("`, the rest of the file must not become one
+    // string literal: an unterminated quote ends at the line break (except a
+    // `\` + newline continuation, which stays inside the literal).
+    constexpr std::string_view source = "foo(\"bar\nint x = 1;\n";
+    const heimdall::Lexer lexer(source);
+    const auto tokens = lexer.Lex();
+    EXPECT_EQ(Reconstruct(source, tokens), source);
+    bool saw_string = false;
+    bool saw_identifier_after = false;
+    for (const auto& token : tokens)
+    {
+        if (token.kind == heimdall::TokenKind::StringLiteral)
+        {
+            saw_string = true;
+            EXPECT_EQ(lexer.Text(token), "\"bar");
+        }
+        if (saw_string && token.kind == heimdall::TokenKind::Identifier &&
+            lexer.Text(token) == "int")
+        {
+            saw_identifier_after = true;
+        }
+    }
+    EXPECT_TRUE(saw_string);
+    EXPECT_TRUE(saw_identifier_after);
+}
+
 TEST(LexerSpec, UnterminatedConstructsConsumeToEndWithoutLosingBytes)
 {
     for (const std::string_view source : { "\"unterminated", "/* unterminated", "R\"x(raw" })

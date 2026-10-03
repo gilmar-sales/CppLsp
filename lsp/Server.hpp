@@ -4,13 +4,17 @@
 
 #include <Heimdall/CompileDatabase.hpp>
 #include <Heimdall/IncludeIndex.hpp>
+#include <Heimdall/ParseTree.hpp>
 
+#include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <simdjson.h>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace heimdall::lsp
 {
@@ -36,12 +40,34 @@ class LanguageServer
     void HoverDocument(simdjson::dom::element request, std::string_view id);
     const heimdall::ScopeIndex* HeaderScopes(std::string_view uri, const std::string& text,
                                             const heimdall::CompileCommand* command);
+    // One ParseTree per (uri, version), shared by diagnostics/completion/hover
+    // so a keystroke pays for a single lex + preprocess + grammar pass.
+    const heimdall::ParseTree& CachedParse(const std::string& uri, const Document& document,
+                                           const heimdall::CompileCommand* command);
+    static heimdall::ParserOptions ParserOptionsFor(const heimdall::CompileCommand* command);
 
     std::unordered_map<std::string, Document> m_documents;
     std::optional<heimdall::CompileDatabase> m_compile_database;
-    // Header index per open document, keyed by resolved headers + flags so it
-    // rebuilds only when the include set changes (not on every keystroke).
-    std::unordered_map<std::string, std::pair<std::string, heimdall::IncludeIndex>> m_include_indices;
+    // Header discovery cache per open document: the fingerprint covers the
+    // file's own `#include` block plus search flags, so repeat keystrokes
+    // skip ResolveHeaders entirely (no stat/read/lex). The built index is
+    // shared globally by content key: the same <vector> is parsed once even
+    // with several files open.
+    struct IncludeCacheEntry
+    {
+        std::string fingerprint;
+        std::vector<std::filesystem::path> headers;
+        std::string index_key;
+    };
+    std::unordered_map<std::string, IncludeCacheEntry> m_include_cache;
+    std::unordered_map<std::string, heimdall::IncludeIndex> m_global_indices;
+    struct ParseCacheEntry
+    {
+        std::int64_t version = -1;
+        heimdall::ParserOptions options;
+        heimdall::ParseTree tree;
+    };
+    std::unordered_map<std::string, ParseCacheEntry> m_parse_cache;
     bool m_enable_semantic = false;
     std::string m_initialization_error;
 };

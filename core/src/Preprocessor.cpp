@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <optional>
 #include <string_view>
 
 namespace heimdall
@@ -51,10 +52,36 @@ std::string_view ReadWord(std::string_view& text)
     return word;
 }
 
+// Overlay of file-local #defines over the shared predefined map: lookups
+// check the small local map first, then a tombstone set for #undef, then the
+// predefined map by pointer. The predefined map is never copied.
+struct MacroScope
+{
+    const Preprocessor::MacroMap* local = nullptr;
+    const Preprocessor::ErasedSet* erased = nullptr;
+    const Preprocessor::MacroMap* predefined = nullptr;
+
+    const std::string* Find(std::string_view name) const
+    {
+        if (local != nullptr)
+        {
+            if (const auto it = local->find(name); it != local->end()) return &it->second;
+        }
+        if (erased != nullptr && erased->find(name) != erased->end()) return nullptr;
+        if (predefined != nullptr)
+        {
+            if (const auto it = predefined->find(name); it != predefined->end()) return &it->second;
+        }
+        return nullptr;
+    }
+
+    bool Contains(std::string_view name) const { return Find(name) != nullptr; }
+};
+
 class IfExpression
 {
   public:
-    IfExpression(std::string_view input, const Preprocessor::MacroMap& macros) : m_input(input), m_macros(macros) {}
+    IfExpression(std::string_view input, const MacroScope& macros) : m_input(input), m_macros(macros) {}
 
     bool Evaluate()
     {
@@ -141,12 +168,12 @@ class IfExpression
             {
                 ++m_pos;
             }
-            const std::string name(m_input.substr(start, m_pos - start));
+            const std::string_view name = m_input.substr(start, m_pos - start);
             if (paren)
             {
                 Consume(")");
             }
-            return m_macros.contains(name) ? 1 : 0;
+            return m_macros.Contains(name) ? 1 : 0;
         }
 
         const std::size_t start = m_pos;
@@ -166,12 +193,12 @@ class IfExpression
         std::string_view atom = m_input.substr(start, m_pos - start);
         if (IsIdentStart(atom.front()))
         {
-            const auto it = m_macros.find(std::string(atom));
-            if (it == m_macros.end())
+            const std::string* replacement = m_macros.Find(atom);
+            if (replacement == nullptr)
             {
                 return 0;
             }
-            atom = Trim(it->second);
+            atom = Trim(*replacement);
         }
         while (!atom.empty() && (atom.back() == 'u' || atom.back() == 'U' || atom.back() == 'l' || atom.back() == 'L'))
         {
@@ -195,7 +222,7 @@ class IfExpression
     }
 
     std::string_view m_input;
-    const Preprocessor::MacroMap& m_macros;
+    const MacroScope& m_macros;
     std::size_t m_pos = 0;
 };
 
@@ -214,7 +241,7 @@ DirectiveKind KindOf(std::string_view name)
     return DirectiveKind::Other;
 }
 
-std::string ExpandObjectMacros(std::string_view line, const Preprocessor::MacroMap& macros, unsigned depth = 0)
+std::string ExpandObjectMacros(std::string_view line, const MacroScope& macros, unsigned depth = 0)
 {
     if (depth >= 16)
     {
@@ -265,15 +292,15 @@ std::string ExpandObjectMacros(std::string_view line, const Preprocessor::MacroM
         {
             const std::size_t start = i++;
             while (i < line.size() && IsIdentContinue(line[i])) ++i;
-            const std::string name(line.substr(start, i - start));
-            const auto it = macros.find(name);
-            if (it == macros.end() || it->second.empty())
+            // Heterogeneous lookup: no std::string temporary per identifier.
+            const std::string* replacement = macros.Find(line.substr(start, i - start));
+            if (replacement == nullptr || replacement->empty())
             {
                 out.append(line.substr(start, i - start));
             }
             else
             {
-                out += ExpandObjectMacros(it->second, macros, depth + 1);
+                out += ExpandObjectMacros(*replacement, macros, depth + 1);
             }
             continue;
         }
@@ -285,10 +312,16 @@ std::string ExpandObjectMacros(std::string_view line, const Preprocessor::MacroM
 
 } // namespace
 
-PreprocessorResult Preprocessor::Process(std::string_view source) const
+PreprocessorResult Preprocessor::Process(std::string_view source, bool build_active_source) const
 {
     PreprocessorResult result;
-    MacroMap macros = m_predefined;
+    // Local overlay: file #defines stay small; predefined macros are read
+    // through the scope pointer without copying the whole map per file.
+    MacroMap local;
+    local.reserve(16);
+    ErasedSet erased;
+    const MacroScope scope { &local, &erased, m_predefined };
+    if (build_active_source) result.active_source.reserve(source.size() / 2);
     std::vector<ConditionalFrame> stack;
     bool active = true;
     std::size_t offset = 0;
@@ -318,12 +351,12 @@ PreprocessorResult Preprocessor::Process(std::string_view source) const
                 bool condition = false;
                 if (kind == DirectiveKind::If)
                 {
-                    condition = IfExpression(trimmed, macros).Evaluate();
+                    condition = IfExpression(trimmed, scope).Evaluate();
                 }
                 else
                 {
-                    const std::string name(ReadWord(trimmed));
-                    condition = macros.contains(name);
+                    const std::string_view name(ReadWord(trimmed));
+                    condition = scope.Contains(name);
                     if (kind == DirectiveKind::Ifndef) condition = !condition;
                 }
                 stack.push_back({ active, active && condition, active && condition, false });
@@ -339,7 +372,7 @@ PreprocessorResult Preprocessor::Process(std::string_view source) const
                 {
                     auto& frame = stack.back();
                     if (frame.saw_else) result.diagnostics.push_back({ line_start, "#elif after #else" });
-                    const bool condition = frame.parent_active && !frame.branch_taken && IfExpression(trimmed, macros).Evaluate();
+                    const bool condition = frame.parent_active && !frame.branch_taken && IfExpression(trimmed, scope).Evaluate();
                     frame.active = condition;
                     frame.branch_taken |= condition;
                     active = frame.active;
@@ -388,23 +421,28 @@ PreprocessorResult Preprocessor::Process(std::string_view source) const
                     // Function-like macro: retain as an opaque definition; do not expand it.
                     if (name_len < trimmed.size() && trimmed[name_len] == '(')
                     {
-                        macros.erase(name);
+                        local.erase(name);
+                        erased.insert(std::move(name));
                     }
                     else
                     {
-                        macros[name] = std::string(Trim(trimmed.substr(name_len)));
+                        erased.erase(name);
+                        local[std::move(name)] = std::string(Trim(trimmed.substr(name_len)));
+                        // A re-#define revives the name even if previously #undef'd.
                     }
                 }
             }
             else if (active && kind == DirectiveKind::Undef)
             {
-                macros.erase(std::string(ReadWord(trimmed)));
+                std::string name(ReadWord(trimmed));
+                local.erase(name);
+                erased.insert(std::move(name));
             }
         }
         else if (active)
         {
             result.active_ranges.push_back({ line_start, line.size() });
-            result.active_source += ExpandObjectMacros(line, macros);
+            if (build_active_source) result.active_source += ExpandObjectMacros(line, scope);
         }
         offset = end;
     }

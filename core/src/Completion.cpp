@@ -693,9 +693,30 @@ Qualifier QualifierBefore(std::string_view source, const std::vector<Token>& tok
 
 // Scope nodes whose qualified path equals the qualifier. Namespaces reopened
 // in several blocks naturally yield several targets whose members unite.
-std::vector<std::size_t> ResolveScope(const ParseTree& tree, const std::vector<std::string>& path)
+std::vector<std::size_t> ResolveScope(const std::vector<std::vector<std::string>>& scope_paths,
+                                       const std::vector<std::string>& path)
 {
     std::vector<std::size_t> targets;
+    for (std::size_t n = 0; n < scope_paths.size(); ++n)
+    {
+        if (scope_paths[n].empty() && path.empty())
+        {
+            // The translation unit itself has no entry in scope_paths (only
+            // namespace/record nodes are cached); the root is handled by
+            // callers via MemberScope() == RootNode checks, so skip empties.
+            continue;
+        }
+        if (scope_paths[n] == path) targets.push_back(n);
+    }
+    return targets;
+}
+
+// Qualified path of every namespace/record node, indexed by node. Built once
+// per completion request: ResolveScope, CollectChildScopes and the namespace
+// loops previously recomputed ScopePath per node on each pass.
+std::vector<std::vector<std::string>> BuildScopePaths(const ParseTree& tree)
+{
+    std::vector<std::vector<std::string>> paths(tree.Nodes().size());
     for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
     {
         const GrammarKind kind = tree.Nodes()[n].kind;
@@ -703,31 +724,25 @@ std::vector<std::size_t> ResolveScope(const ParseTree& tree, const std::vector<s
         {
             continue;
         }
-        if (ScopePath(tree, n) == path) targets.push_back(n);
+        paths[n] = ScopePath(tree, n);
     }
-    return targets;
+    return paths;
 }
 
-bool InNamedScope(const ParseTree& tree, std::size_t offset)
+// Contiguous function/lambda ranges, sorted by start offset. Built once per
+// completion request so occurrence visibility is a binary search per token
+// instead of the previous O(TxN) InnermostCallable scan per identifier.
+struct CallableInterval
 {
-    for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
-    {
-        const GrammarKind kind = tree.Nodes()[n].kind;
-        if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
-        {
-            continue;
-        }
-        const auto [start, end] = NodeRange(tree, n);
-        if (start <= offset && offset < end) return true;
-    }
-    return false;
-}
+    std::size_t start = 0;
+    std::size_t end = 0;
+    std::size_t node = NoIndex;
+};
 
-// Innermost function/lambda range containing pos, for occurrence visibility.
-std::size_t InnermostCallable(const ParseTree& tree, std::size_t pos)
+std::vector<CallableInterval> BuildCallableIntervals(const ParseTree& tree)
 {
-    std::size_t found = NoIndex;
-    std::size_t span = static_cast<std::size_t>(-1);
+    std::vector<CallableInterval> intervals;
+    intervals.reserve(tree.Nodes().size() / 8);
     for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
     {
         const GrammarKind kind = tree.Nodes()[n].kind;
@@ -736,13 +751,71 @@ std::size_t InnermostCallable(const ParseTree& tree, std::size_t pos)
             continue;
         }
         const auto [start, end] = NodeRange(tree, n);
-        if (start <= pos && pos <= end && end - start < span)
-        {
-            found = n;
-            span = end - start;
-        }
+        if (end <= start && start != 0) continue;
+        if (start == 0 && end == 0) continue;
+        intervals.push_back({ start, end, n });
     }
-    return found;
+    std::sort(intervals.begin(), intervals.end(), [](const CallableInterval& left,
+                                                     const CallableInterval& right) {
+        if (left.start != right.start) return left.start < right.start;
+        return left.end > right.end;
+    });
+    return intervals;
+}
+
+// Innermost function/lambda range containing pos (inclusive end, matching the
+// old linear scan). Intervals nest, so walking back from the last start<=pos
+// finds the innermost container with the first end>=pos hit.
+std::size_t FindCallable(const std::vector<CallableInterval>& intervals, std::size_t pos)
+{
+    std::size_t lo = 0;
+    std::size_t hi = intervals.size();
+    while (lo < hi)
+    {
+        const std::size_t mid = lo + (hi - lo) / 2;
+        if (intervals[mid].start <= pos) lo = mid + 1;
+        else hi = mid;
+    }
+    for (std::size_t k = lo; k > 0; --k)
+    {
+        const auto& interval = intervals[k - 1];
+        if (pos <= interval.end) return interval.node;
+    }
+    return NoIndex;
+}
+
+// Named namespace/record ranges for the `!InNamedScope` global-qualifier
+// filter, built once per request instead of one O(N) scan per token.
+struct ScopeInterval
+{
+    std::size_t start = 0;
+    std::size_t end = 0;
+};
+
+std::vector<ScopeInterval> BuildNamedScopeIntervals(const ParseTree& tree)
+{
+    std::vector<ScopeInterval> intervals;
+    for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
+    {
+        const GrammarKind kind = tree.Nodes()[n].kind;
+        if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
+        {
+            continue;
+        }
+        const auto [start, end] = NodeRange(tree, n);
+        if (end <= start) continue;
+        intervals.push_back({ start, end });
+    }
+    return intervals;
+}
+
+bool InNamedScopeIntervals(const std::vector<ScopeInterval>& intervals, std::size_t offset)
+{
+    for (const auto& interval : intervals)
+    {
+        if (interval.start <= offset && offset < interval.end) return true;
+    }
+    return false;
 }
 
 // The grammar does not always materialize the tag name itself as a
@@ -1343,17 +1416,14 @@ void CollectTagNames(std::string_view source, const std::vector<Token>& tokens,
 // global `::` scope, including names introduced by compound definitions
 // (`namespace a::b`) that have no intermediate node to match exactly.
 void CollectChildScopes(const ParseTree& tree, std::string_view source, const std::vector<Token>& tokens,
+                        const std::vector<std::vector<std::string>>& scope_paths,
                         const std::vector<std::string>& qualifier,
                         std::unordered_map<std::string, CompletionItem>& best, std::string_view prefix)
 {
-    for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+    for (std::size_t n = 0; n < scope_paths.size(); ++n)
     {
-        const GrammarKind kind = tree.Nodes()[n].kind;
-        if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
-        {
-            continue;
-        }
-        const std::vector<std::string> path = ScopePath(tree, n);
+        if (scope_paths[n].empty()) continue;
+        const std::vector<std::string>& path = scope_paths[n];
         if (path.size() <= qualifier.size()) continue;
         bool matches = true;
         for (std::size_t i = 0; i < qualifier.size(); ++i)
@@ -1382,15 +1452,32 @@ ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOp
     const std::vector<Token> tokens = Lexer(source).Lex();
     const ParseTree tree = ParseTree::Parse(source, options);
     ScopeIndex index;
-    auto entry_for = [&](const std::vector<std::string>& path, CompletionKind kind) -> IndexedScope& {
-        for (auto& entry : index)
+    // Merged-by-path lookup: was a linear scan per scope (O(S^2) over the
+    // headers' scopes). Paths are '\0'-joined; scope names never contain NUL.
+    std::unordered_map<std::string, std::size_t> entry_pos;
+    auto path_key = [](const std::vector<std::string>& path) {
+        std::string key;
+        for (const auto& element : path)
         {
-            if (entry.path == path) return entry;
+            key += element;
+            key += '\0';
         }
+        return key;
+    };
+    auto entry_for = [&](const std::vector<std::string>& path, CompletionKind kind) -> IndexedScope& {
+        const std::string key = path_key(path);
+        if (const auto found = entry_pos.find(key); found != entry_pos.end())
+        {
+            return index[found->second];
+        }
+        const std::size_t pos = index.size();
         index.push_back({ path, kind, {} });
+        entry_pos.emplace(key, pos);
         return index.back();
     };
     entry_for({}, CompletionKind::Keyword);
+
+    const std::vector<std::vector<std::string>> scope_paths = BuildScopePaths(tree);
 
     // Declared names bucketed by owning scope; function locals land on body
     // blocks (no entry) and are skipped: they are not qualifier-addressable.
@@ -1412,7 +1499,9 @@ ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOp
         if (name.empty() || IsKeyword(name)) continue;
         const CompletionKind kind = ClassifyDeclaredName(tree, n);
         if (kind == CompletionKind::Variable && name.front() == '_') continue;
-        IndexedScope& entry = entry_for(ScopePath(tree, scope), CompletionKind::Type);
+        IndexedScope& entry = entry_for(scope < scope_paths.size() ? scope_paths[scope]
+                                                                   : ScopePath(tree, scope),
+                                        CompletionKind::Type);
         entry.members.push_back(DescribeDeclared(tree, index_children, source, tokens, n, name, kind));
     }
     // Nested scope names owned by each entry's scope.
@@ -1433,8 +1522,12 @@ ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOp
         }
         const auto elements = ScopeNameElements(tree, n);
         if (elements.empty() || elements.back().empty() || elements.back().front() == '_') continue;
-        IndexedScope& entry = entry_for(ScopePath(tree, owner), CompletionKind::Type);
-        entry.members.push_back(MakeNamespaceItem(tree, source, tokens, n, ScopePath(tree, n)));
+        const std::vector<std::string> owner_path =
+            owner < scope_paths.size() && !scope_paths[owner].empty() ? scope_paths[owner] : ScopePath(tree, owner);
+        const std::vector<std::string> full_path =
+            n < scope_paths.size() && !scope_paths[n].empty() ? scope_paths[n] : ScopePath(tree, n);
+        IndexedScope& entry = entry_for(owner_path, CompletionKind::Type);
+        entry.members.push_back(MakeNamespaceItem(tree, source, tokens, n, full_path));
     }
     // Tag names bucketed by innermost enclosing named scope.
     std::vector<TagName> tags;
@@ -1458,7 +1551,10 @@ ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOp
                 span = end - start;
             }
         }
-        IndexedScope& entry = entry_for(ScopePath(tree, bucket), CompletionKind::Type);
+        IndexedScope& entry = entry_for(bucket < scope_paths.size() && !scope_paths[bucket].empty()
+                                                ? scope_paths[bucket]
+                                                : ScopePath(tree, bucket),
+                                        CompletionKind::Type);
         entry.members.push_back(MakeTagItem(source, tokens, tag));
     }
     // Macros are always global.
@@ -1512,10 +1608,11 @@ namespace
 
 void CompleteExpression(const ParseTree& tree, std::string_view source,
                         const std::vector<Token>& tokens, const ParserOptions& options,
-                        std::size_t offset, std::string_view prefix, const ScopeIndex* external,
+                        const ChildrenIndex& children, const std::vector<CallableInterval>& callables,
+                        const std::vector<std::vector<std::string>>& scope_paths, std::size_t offset,
+                        std::string_view prefix, const ScopeIndex* external,
                         std::unordered_map<std::string, CompletionItem>& best)
 {
-    const ChildrenIndex children = BuildChildren(tree);
     for (const auto keyword : kKeywords)
     {
         if (!prefix.empty() && !StartsWith(keyword, prefix)) continue;
@@ -1529,7 +1626,12 @@ void CompleteExpression(const ParseTree& tree, std::string_view source,
     // when it occurs at global scope or earlier in the cursor's own function.
     // This hides locals of other functions while keeping words the grammar
     // has not modeled, and still works mid-recovery on incomplete code.
-    const std::size_t cursor_callable = InnermostCallable(tree, offset);
+    // Callable intervals are binary-searched per token (was: one O(N) node
+    // scan per token), and repeat identifiers are deduped by view before any
+    // std::string allocation (was: one CompletionItem per occurrence).
+    const std::size_t cursor_callable = FindCallable(callables, offset);
+    std::unordered_set<std::string_view> seen_lexical;
+    seen_lexical.reserve(tokens.size());
     for (const auto& token : tokens)
     {
         if (token.kind != TokenKind::Identifier) continue;
@@ -1537,7 +1639,8 @@ void CompleteExpression(const ParseTree& tree, std::string_view source,
         if (text == prefix) continue; // don't echo the word being typed
         if (!prefix.empty() && !StartsWith(text, prefix)) continue;
         if (IsKeyword(text)) continue; // keyword entry already added
-        const std::size_t owner = InnermostCallable(tree, token.offset);
+        if (!seen_lexical.insert(text).second) continue;
+        const std::size_t owner = FindCallable(callables, token.offset);
         if (owner != NoIndex && (owner != cursor_callable || token.offset >= offset)) continue;
         InsertItem(best, { std::string(text), CompletionKind::Variable, "variable", {} });
     }
@@ -1576,11 +1679,11 @@ void CompleteExpression(const ParseTree& tree, std::string_view source,
     // Top-level namespaces are visible unqualified (as qualifier heads) with
     // their documentation attached. Nested ones stay qualified-only. The
     // Namespace kind outranks the lexical fallback's plain Variable.
-    for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+    for (std::size_t n = 0; n < scope_paths.size(); ++n)
     {
         if (tree.Nodes()[n].kind != GrammarKind::NamespaceDefinition) continue;
-        const std::vector<std::string> path = ScopePath(tree, n);
-        if (path.size() != 1 || path.front().empty()) continue;
+        if (scope_paths[n].size() != 1 || scope_paths[n].front().empty()) continue;
+        const std::vector<std::string>& path = scope_paths[n];
         if (IsKeyword(path.front()) || path.front().front() == '_') continue;
         if (!prefix.empty() && !StartsWith(path.front(), prefix)) continue;
         InsertItem(best, MakeNamespaceItem(tree, source, tokens, n, path));
@@ -1618,8 +1721,11 @@ bool MatchesPrefix(std::string_view name, std::string_view prefix)
 }
 
 void CompleteQualified(const ParseTree& tree, std::string_view source,
-                       const std::vector<Token>& tokens, std::size_t offset, std::string_view prefix,
-                       const ScopeIndex* external,
+                       const std::vector<Token>& tokens, const ChildrenIndex& children,
+                       const std::vector<std::vector<std::string>>& scope_paths,
+                       const std::vector<CallableInterval>& callables,
+                       const std::vector<ScopeInterval>& named_scopes, std::size_t offset,
+                       std::string_view prefix, const ScopeIndex* external,
                        std::unordered_map<std::string, CompletionItem>& best)
 {
     const std::size_t scope_op = AccessOperatorBefore(source, tokens, offset, prefix);
@@ -1631,7 +1737,7 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
     {
         // Leading `::` names the global scope: no keywords, builtins, macros
         // or function locals, and no record members.
-        const ChildrenIndex global_children = BuildChildren(tree);
+        const ChildrenIndex& global_children = children;
         for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
         {
             if (tree.Nodes()[n].kind != GrammarKind::DeclaredName) continue;
@@ -1644,16 +1750,19 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
             if (IsKeyword(name) && kind == CompletionKind::Variable) continue;
             InsertItem(best, DescribeDeclared(tree, global_children, source, tokens, n, name, kind));
         }
+        std::unordered_set<std::string_view> seen_global;
+        seen_global.reserve(tokens.size());
         for (const auto& token : tokens)
         {
             if (token.kind != TokenKind::Identifier) continue;
             const std::string_view text = TokenText(source, token);
             if (!MatchesPrefix(text, prefix) || IsKeyword(text)) continue;
-            if (InnermostCallable(tree, token.offset) != NoIndex) continue;
-            if (InNamedScope(tree, token.offset)) continue;
+            if (!seen_global.insert(text).second) continue;
+            if (FindCallable(callables, token.offset) != NoIndex) continue;
+            if (InNamedScopeIntervals(named_scopes, token.offset)) continue;
             InsertItem(best, { std::string(text), CompletionKind::Variable, "variable", {} });
         }
-        CollectChildScopes(tree, source, tokens, {}, best, prefix);
+        CollectChildScopes(tree, source, tokens, scope_paths, {}, best, prefix);
         if (external != nullptr)
         {
             for (const auto& scope : *external)
@@ -1676,7 +1785,7 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
         return;
     }
 
-    const std::vector<std::size_t> targets = ResolveScope(tree, qualifier.path);
+    const std::vector<std::size_t> targets = ResolveScope(scope_paths, qualifier.path);
     // External (header) scopes matching the qualifier union with local ones.
     // An empty target set with no external match means an unknown qualifier.
     bool saw_external = false;
@@ -1721,7 +1830,7 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
         }
         return false;
     };
-    const ChildrenIndex qualified_children = BuildChildren(tree);
+    const ChildrenIndex& qualified_children = children;
     for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
     {
         if (tree.Nodes()[n].kind != GrammarKind::DeclaredName) continue;
@@ -1756,7 +1865,7 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
     }
     // Members introduced by deeper compound definitions (`ns::a::b` makes `a`
     // visible under `ns::` even without an intermediate node).
-    CollectChildScopes(tree, source, tokens, qualifier.path, best, prefix);
+    CollectChildScopes(tree, source, tokens, scope_paths, qualifier.path, best, prefix);
 }
 
 } // namespace
@@ -1818,13 +1927,72 @@ std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source,
         // The grammar tree carries the scope structure for both unqualified
         // visibility and qualified (`ns::`) member resolution.
         const ParseTree tree = ParseTree::Parse(source, options);
+        return Complete(tree, options, offset, external);
+    }
+
+    std::vector<CompletionItem> items;
+    items.reserve(best.size());
+    for (auto& [label, item] : best)
+    {
+        (void)label;
+        items.push_back(std::move(item));
+    }
+    std::sort(items.begin(), items.end(), [](const CompletionItem& left, const CompletionItem& right) {
+        if (left.label != right.label) return left.label < right.label;
+        return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+    });
+    return items;
+}
+
+std::vector<CompletionItem> CompletionEngine::Complete(const ParseTree& tree, const ParserOptions& options,
+                                                       std::size_t offset, const ScopeIndex* external)
+{
+    const std::string_view source = tree.Source();
+    const std::vector<Token>& tokens = tree.Tokens();
+    if (offset > source.size()) offset = source.size();
+    const std::string prefix = PrefixAt(source, offset);
+    const CursorContext context = ClassifyContext(source, tokens, offset, prefix);
+
+    if (context == CursorContext::Suppressed) return {};
+    if (context == CursorContext::MemberAccess) return {};
+
+    std::unordered_map<std::string, CompletionItem> best;
+
+    if (context == CursorContext::Preprocessor)
+    {
+        for (const auto directive : kDirectives)
+        {
+            if (prefix.empty() || StartsWith(directive, prefix))
+            {
+                InsertItem(best, { std::string(directive), CompletionKind::Directive, "directive", {} });
+            }
+        }
+        CollectDefines(source, tokens, best, prefix);
+        for (const auto& [name, value] : options.predefined_macros)
+        {
+            if (!prefix.empty() && !StartsWith(name, prefix)) continue;
+            std::string detail = value.empty() ? "macro" : value;
+            if (detail.size() > 128) detail.resize(128);
+            InsertItem(best, { name, CompletionKind::Macro, std::move(detail), {} });
+        }
+    }
+    else
+    {
+        // Shared per-request indexes: one children table, one callable table
+        // and one scope-path table for all lookup passes below.
+        const ChildrenIndex children = BuildChildren(tree);
+        const std::vector<CallableInterval> callables = BuildCallableIntervals(tree);
+        const std::vector<std::vector<std::string>> scope_paths = BuildScopePaths(tree);
         if (context == CursorContext::ScopeAccess)
         {
-            CompleteQualified(tree, source, tokens, offset, prefix, external, best);
+            const std::vector<ScopeInterval> named_scopes = BuildNamedScopeIntervals(tree);
+            CompleteQualified(tree, source, tokens, children, scope_paths, callables, named_scopes,
+                              offset, prefix, external, best);
         }
         else
         {
-            CompleteExpression(tree, source, tokens, options, offset, prefix, external, best);
+            CompleteExpression(tree, source, tokens, options, children, callables, scope_paths, offset,
+                               prefix, external, best);
         }
     }
 
@@ -1859,6 +2027,27 @@ std::optional<CompletionItem> CompletionEngine::Hover(std::string_view source,
     // Complete at the word end filters by the whole word; the exact match is
     // the hovered symbol with its signature and documentation attached.
     const auto items = Complete(source, options, end, external);
+    for (const auto& item : items)
+    {
+        if (item.label == word) return item;
+    }
+    return std::nullopt;
+}
+
+std::optional<CompletionItem> CompletionEngine::Hover(const ParseTree& tree, const ParserOptions& options,
+                                                      std::size_t offset, const ScopeIndex* external)
+{
+    const std::string_view source = tree.Source();
+    if (offset > source.size()) offset = source.size();
+    if (source.empty()) return std::nullopt;
+    std::size_t start = offset;
+    while (start > 0 && IsIdentChar(source[start - 1])) --start;
+    std::size_t end = offset;
+    while (end < source.size() && IsIdentChar(source[end])) ++end;
+    if (start == end) return std::nullopt;
+    const std::string word(source.substr(start, end - start));
+    if (!IsIdentStart(word.front()) || IsKeyword(word)) return std::nullopt;
+    const auto items = Complete(tree, options, end, external);
     for (const auto& item : items)
     {
         if (item.label == word) return item;
