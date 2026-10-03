@@ -95,6 +95,7 @@ lsp/                    # heimdall-lsp: main.cpp + JsonRpc/Document/Server modul
 vscode-extension/       # VS Code extension manifest and LSP client
 test/                   # GoogleTest suite, incl. core dependency-policy guard (explicit sources)
 bench/                  # Google Benchmark suite (explicit sources) + corpus
+docs/                   # design notes: linter/formatter architecture, completion limits, mmap I/O
 ```
 
 Binaries land in `build/src/heimdall` and `build/lsp/heimdall-lsp`
