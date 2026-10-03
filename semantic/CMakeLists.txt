@@ -6,6 +6,7 @@
 add_library(heimdall_semantic STATIC
   src/CompileDatabase.cpp
   src/SemanticAnalyzer.cpp
+  src/IncludeIndex.cpp
 )
 add_library(heimdall::semantic ALIAS heimdall_semantic)
 

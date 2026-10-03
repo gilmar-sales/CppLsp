@@ -17,6 +17,5 @@ int main()
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
     heimdall::lsp::LanguageServer server;
-
     return server.Run() ? 0 : 1;
 }

@@ -3,12 +3,14 @@
 #include "Document.hpp"
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/IncludeIndex.hpp>
 
 #include <optional>
 #include <simdjson.h>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 namespace heimdall::lsp
 {
@@ -33,6 +35,9 @@ class LanguageServer
 
     std::unordered_map<std::string, Document> m_documents;
     std::optional<heimdall::CompileDatabase> m_compile_database;
+    // Header index per open document, keyed by resolved headers + flags so it
+    // rebuilds only when the include set changes (not on every keystroke).
+    std::unordered_map<std::string, std::pair<std::string, heimdall::IncludeIndex>> m_include_indices;
     bool m_enable_semantic = false;
     std::string m_initialization_error;
 };

@@ -19,6 +19,9 @@ struct CompileCommand
     std::unordered_map<std::string, std::string> defines;
     std::vector<std::string> undefines;
     std::vector<std::filesystem::path> include_directories;
+    // Quoted-include-only directories (-iquote); searched for "..." after the
+    // including file's own directory, before the general include directories.
+    std::vector<std::filesystem::path> quote_directories;
     CppStandard standard = CppStandard::Cpp20;
 };
 

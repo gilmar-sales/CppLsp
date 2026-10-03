@@ -337,6 +337,90 @@ TEST(CompletionSpec, GlobalQualifierListsGlobalsWithoutLocalsOrKeywords)
     EXPECT_FALSE(Contains(items, "goto"));
 }
 
+TEST(CompletionSpec, IndexScopesListsScopesAndMembers)
+{
+    constexpr std::string_view source =
+        "#define FEATURE_FLAG 1\n"
+        "int global_fn() { return 0; }\n"
+        "namespace tools {\n"
+        "struct Widget { int value; };\n"
+        "int tool_fn();\n"
+        "namespace inner {\n"
+        "int deep_fn();\n"
+        "}\n"
+        "}\n"
+        "enum class Color { Red, Green };\n";
+    const heimdall::ScopeIndex index =
+        heimdall::CompletionEngine::IndexScopes(source, heimdall::ParserOptions {});
+
+    auto find_scope = [&](std::vector<std::string> path) -> const heimdall::IndexedScope* {
+        for (const auto& scope : index)
+        {
+            if (scope.path == path) return &scope;
+        }
+        return nullptr;
+    };
+    const auto* root = find_scope({});
+    ASSERT_NE(root, nullptr);
+    EXPECT_TRUE(Contains(root->members, "global_fn"));
+    EXPECT_TRUE(Contains(root->members, "FEATURE_FLAG"));
+    EXPECT_TRUE(Contains(root->members, "tools"));
+
+    const auto* tools = find_scope({ "tools" });
+    ASSERT_NE(tools, nullptr);
+    EXPECT_TRUE(Contains(tools->members, "Widget"));
+    EXPECT_TRUE(Contains(tools->members, "tool_fn"));
+    EXPECT_TRUE(Contains(tools->members, "inner"));
+    EXPECT_FALSE(Contains(tools->members, "deep_fn"));
+
+    const auto* inner = find_scope({ "tools", "inner" });
+    ASSERT_NE(inner, nullptr);
+    EXPECT_TRUE(Contains(inner->members, "deep_fn"));
+}
+
+TEST(CompletionSpec, ExternalIndexFeedsQualifiedLookup)
+{
+    const heimdall::ScopeIndex external = {
+        { { "std" }, heimdall::CompletionKind::Namespace,
+          { { "vector", heimdall::CompletionKind::Type, "type" } } },
+        { {}, heimdall::CompletionKind::Keyword, { { "printf", heimdall::CompletionKind::Function, "function" } } },
+    };
+    constexpr std::string_view use = "int x = std::vec;\n";
+    const auto qualified =
+        heimdall::CompletionEngine::Complete(use, heimdall::ParserOptions {}, use.size() - 2, &external);
+    EXPECT_TRUE(Contains(qualified, "vector"));
+    EXPECT_FALSE(Contains(qualified, "printf"));
+
+    // Namespaced header members stay qualified-only: unqualified `vec` must
+    // not offer `std::vector`...
+    constexpr std::string_view plain_use = "int y = vec;\n";
+    const auto plain = heimdall::CompletionEngine::Complete(plain_use, heimdall::ParserOptions {},
+                                                           plain_use.size() - 2, &external);
+    EXPECT_FALSE(Contains(plain, "vector"));
+    // ...while header globals are visible unqualified.
+    constexpr std::string_view global_use = "int y = print;\n";
+    const auto globals = heimdall::CompletionEngine::Complete(global_use, heimdall::ParserOptions {},
+                                                             global_use.size() - 2, &external);
+    EXPECT_TRUE(Contains(globals, "printf"));
+}
+
+TEST(CompletionSpec, ClassifiesTypeAliasesAsTypes)
+{
+    constexpr std::string_view source =
+        "template<class T> struct Basic {};\n"
+        "typedef Basic<char> narrow;\n"
+        "using wide = Basic<wchar_t>;\n"
+        "int nar;\n";
+    // Cursor past `;` (empty prefix) so both aliases match.
+    const auto items = heimdall::CompletionEngine::Complete(source, source.size() - 1);
+    const auto* narrow = Find(items, "narrow");
+    ASSERT_NE(narrow, nullptr);
+    EXPECT_EQ(narrow->kind, heimdall::CompletionKind::Type);
+    const auto* wide = Find(items, "wide");
+    ASSERT_NE(wide, nullptr);
+    EXPECT_EQ(wide->kind, heimdall::CompletionKind::Type);
+}
+
 TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
 {
     constexpr std::string_view source = "int alpha = 1;\nint alpha = 2;\nint alp";

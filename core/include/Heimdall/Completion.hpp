@@ -29,6 +29,20 @@ struct CompletionItem
     std::string detail;
 };
 
+// One named scope and its direct members. `path` is the qualified path from
+// the translation unit (`{"std", "chrono"}`); an empty path denotes the
+// global scope. `kind` describes the scope itself when listed as a member
+// (Namespace for namespaces, Type for records). Backbone for header indexing:
+// headers are parsed exactly like sources and their scopes merged by path.
+struct IndexedScope
+{
+    std::vector<std::string> path;
+    CompletionKind kind = CompletionKind::Type;
+    std::vector<CompletionItem> members;
+};
+
+using ScopeIndex = std::vector<IndexedScope>;
+
 // Lexical + local ParseTree completion engine (core, STL only).
 // Works on incomplete code: ParseTree diagnostics are ignored, candidates
 // are collected from lexer identifiers, DeclaredName nodes and macros,
@@ -40,6 +54,14 @@ class CompletionEngine
     static std::vector<CompletionItem> Complete(std::string_view source, std::size_t offset);
     static std::vector<CompletionItem> Complete(std::string_view source, const ParserOptions& options,
                                                std::size_t offset);
+    // External scopes (e.g. indexed headers) merged into lookup: qualified
+    // `ns::` also matches external scopes, unqualified completion also offers
+    // external global-scope members. May be nullptr for single-file lookup.
+    static std::vector<CompletionItem> Complete(std::string_view source, const ParserOptions& options,
+                                                std::size_t offset, const ScopeIndex* external);
+    // Structural index of one file: every namespace/record scope (plus the
+    // global scope) with its direct members, merged by qualified path.
+    static ScopeIndex IndexScopes(std::string_view source, const ParserOptions& options);
 };
 
 } // namespace heimdall

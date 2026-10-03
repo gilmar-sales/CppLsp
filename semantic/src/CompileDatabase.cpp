@@ -47,6 +47,12 @@ void ParseOption(CompileCommand& command, std::string_view arg, std::string_view
         if (include.is_relative()) include = command.directory / include;
         command.include_directories.push_back(include.lexically_normal());
     };
+    auto parse_quote = [&command](std::string_view value) {
+        if (value.empty()) return;
+        std::filesystem::path quote(value);
+        if (quote.is_relative()) quote = command.directory / quote;
+        command.quote_directories.push_back(quote.lexically_normal());
+    };
 
     auto parse_standard = [&command](std::string_view value) {
         if (value == "c++23" || value == "gnu++23" || value == "c++2b" || value == "gnu++2b")
@@ -81,6 +87,23 @@ void ParseOption(CompileCommand& command, std::string_view arg, std::string_view
         if (!next.empty()) { parse_include(next); consume_next = true; }
     }
     else if (arg.starts_with("-I") || arg.starts_with("/I")) parse_include(arg.substr(2));
+    else if (arg == "-iquote")
+    {
+        if (!next.empty()) { parse_quote(next); consume_next = true; }
+    }
+    else if (arg.starts_with("-iquote")) parse_quote(arg.substr(7));
+    // -isystem/-idirafter share ordinary search semantics here; keeping them
+    // in the general directories is a simplification of the true -I/-isystem
+    // ordering, documented for include resolution.
+    else if (arg == "-isystem" || arg == "-idirafter")
+    {
+        if (!next.empty()) { parse_include(next); consume_next = true; }
+    }
+    else if (arg.starts_with("-isystem") || arg.starts_with("-idirafter"))
+    {
+        const auto value = arg.starts_with("-isystem") ? arg.substr(8) : arg.substr(10);
+        parse_include(value);
+    }
 }
 
 std::vector<std::string> SplitCommand(std::string_view command)

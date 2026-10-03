@@ -19,6 +19,7 @@ add_executable(Tests_run
   src/SemanticAnalyzerSpec.cpp
   src/CompletionSpec.cpp
   src/DocumentSpec.cpp
+  src/IncludeIndexSpec.cpp
   ../../lsp/Document.cpp
 )
 

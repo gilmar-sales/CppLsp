@@ -246,6 +246,7 @@ void LanguageServer::CloseDocument(simdjson::dom::element request)
     simdjson::dom::object text_document;
     if (!DocumentParams(request, uri, text_document)) return;
     m_documents.erase(std::string(uri));
+    m_include_indices.erase(std::string(uri));
     std::string message = "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":";
     QuoteJson(uri, message);
     message += ",\"diagnostics\":[]}}";
@@ -396,7 +397,20 @@ void LanguageServer::CompleteDocument(simdjson::dom::element request, std::strin
         parser_options.standard = command->standard;
         parser_options.predefined_macros = command->defines;
     }
-    const auto items = heimdall::CompletionEngine::Complete(text, parser_options, offset);
+    // Include index (headers from disk): rebuilt only when the resolved
+    // header set or flags change; per-keystroke completions reuse the cache.
+    const std::filesystem::path file_path = PathFromUri(uri);
+    const std::filesystem::path base_dir =
+        file_path.has_parent_path() ? file_path.parent_path() : std::filesystem::path();
+    const auto headers = heimdall::IncludeIndex::ResolveHeaders(base_dir, text, command);
+    const std::string index_key = heimdall::IncludeIndex::CacheKey(headers, command);
+    auto& cached = m_include_indices[std::string(uri)];
+    if (cached.first != index_key)
+    {
+        cached = { index_key, heimdall::IncludeIndex::Build(headers, command) };
+    }
+    const auto items =
+        heimdall::CompletionEngine::Complete(text, parser_options, offset, &cached.second.Scopes());
     const std::string prefix = heimdall::CompletionEngine::PrefixAt(text, offset);
     const Position start = ToPosition(text, offset - prefix.size());
     const Position end = ToPosition(text, offset);

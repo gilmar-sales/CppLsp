@@ -285,6 +285,28 @@ CompletionKind ClassifyDeclaredName(const ParseTree& tree, std::size_t node_inde
             return CompletionKind::Variable;
         }
         if (kind == GrammarKind::Enumerator) return CompletionKind::Variable;
+        if (kind == GrammarKind::UsingDeclaration) return CompletionKind::Type;
+        if (kind == GrammarKind::Declaration)
+        {
+            // Old-style `typedef Rep name;` introduces a type alias. Trivia
+            // (comments, blank lines) and leading macros shift the keyword, so
+            // scan the first significant tokens instead of raw positions.
+            const GrammarNode& declaration = tree.Nodes()[current];
+            const std::size_t last =
+                std::min(declaration.first_token + declaration.token_count, tree.Tokens().size());
+            std::size_t seen = 0;
+            for (std::size_t t = declaration.first_token; t < last && seen < 4; ++t)
+            {
+                const TokenKind token_kind = tree.Tokens()[t].kind;
+                if (token_kind == TokenKind::Whitespace || token_kind == TokenKind::LineComment ||
+                    token_kind == TokenKind::BlockComment)
+                {
+                    continue;
+                }
+                if (tree.Text(tree.Tokens()[t]) == "typedef") return CompletionKind::Type;
+                ++seen;
+            }
+        }
         current = tree.Nodes()[current].parent;
     }
     return CompletionKind::Variable;
@@ -533,9 +555,42 @@ std::vector<std::string> ScopeNameElements(const ParseTree& tree, std::size_t no
     return { {} };
 }
 
+// Whether a namespace definition is `inline namespace` (members visible as
+// direct members of the enclosing scope).
+bool IsInlineNamespace(const ParseTree& tree, std::size_t node)
+{
+    const auto& nodes = tree.Nodes();
+    if (node >= nodes.size() || nodes[node].kind != GrammarKind::NamespaceDefinition) return false;
+    const GrammarNode& grammar = nodes[node];
+    const std::size_t end =
+        std::min(grammar.first_token + grammar.token_count, tree.Tokens().size());
+    bool seen_inline = false;
+    for (std::size_t i = grammar.first_token; i < end; ++i)
+    {
+        const Token& token = tree.Tokens()[i];
+        if (token.kind == TokenKind::Whitespace || token.kind == TokenKind::LineComment ||
+            token.kind == TokenKind::BlockComment)
+        {
+            continue;
+        }
+        const std::string_view word = tree.Text(token);
+        if (word == "inline")
+        {
+            seen_inline = true;
+            continue;
+        }
+        if (word == "export") continue;
+        return seen_inline && word == "namespace";
+    }
+    return false;
+}
+
 // Qualified path of a scope node from the translation unit down, e.g.
 // `outer::inner`. Function-like levels cannot be named from the outside and
-// are skipped, so a function-local struct still resolves by its tag.
+// are skipped, so a function-local struct still resolves by its tag. Inline
+// namespaces are transparent (their members are visible as direct members of
+// the enclosing scope), which is what makes e.g. libc++ `std::__1::vector`
+// resolve as `std::vector`.
 std::vector<std::string> ScopePath(const ParseTree& tree, std::size_t node)
 {
     std::vector<std::string> path;
@@ -546,8 +601,11 @@ std::vector<std::string> ScopePath(const ParseTree& tree, std::size_t node)
         if (kind == GrammarKind::TranslationUnit) break;
         if (kind == GrammarKind::NamespaceDefinition || kind == GrammarKind::RecordDefinition)
         {
-            const auto elements = ScopeNameElements(tree, current);
-            path.insert(path.begin(), elements.begin(), elements.end());
+            if (!IsInlineNamespace(tree, current))
+            {
+                const auto elements = ScopeNameElements(tree, current);
+                path.insert(path.begin(), elements.begin(), elements.end());
+            }
         }
         current = tree.Nodes()[current].parent;
     }
@@ -677,9 +735,13 @@ void CollectDefines(std::string_view source, const std::vector<Token>& tokens,
 // plus `using Name` and `concept Name`. Mirrors SemanticAnalyzer::
 // CollectTypeNames. The range restriction serves qualified lookup, which
 // only wants tags nested directly in the resolved scope.
-void CollectTagNamesIn(std::string_view source, const std::vector<Token>& tokens,
-                       std::unordered_map<std::string, CompletionKind>& best, std::string_view prefix,
-                       std::size_t range_start, std::size_t range_end)
+struct TagName
+{
+    std::string_view text;
+    std::size_t offset = 0;
+};
+
+void ScanTagNames(std::string_view source, const std::vector<Token>& tokens, std::vector<TagName>& out)
 {
     struct Word
     {
@@ -702,17 +764,15 @@ void CollectTagNamesIn(std::string_view source, const std::vector<Token>& tokens
     };
     for (std::size_t i = 0; i < words.size(); ++i)
     {
-        Word candidate {};
-        auto take = [&](std::size_t index) {
-            if (index < words.size() && is_word(words[index].text) && !IsKeyword(words[index].text) &&
-                words[index].offset >= range_start && words[index].offset < range_end)
+        auto emit = [&](std::size_t index) {
+            if (index < words.size() && is_word(words[index].text))
             {
-                candidate = words[index];
+                out.push_back({ words[index].text, words[index].offset });
             }
         };
         if (words[i].text == "using" || words[i].text == "concept")
         {
-            take(i + 1);
+            emit(i + 1);
         }
         else if (words[i].text == "class" || words[i].text == "struct" || words[i].text == "union" ||
                  words[i].text == "enum")
@@ -723,12 +783,23 @@ void CollectTagNamesIn(std::string_view source, const std::vector<Token>& tokens
             {
                 ++name;
             }
-            take(name);
+            emit(name);
         }
-        if (!candidate.text.empty() && (prefix.empty() || StartsWith(candidate.text, prefix)))
-        {
-            InsertCandidate(best, candidate.text, CompletionKind::Type);
-        }
+    }
+}
+
+void CollectTagNamesIn(std::string_view source, const std::vector<Token>& tokens,
+                       std::unordered_map<std::string, CompletionKind>& best, std::string_view prefix,
+                       std::size_t range_start, std::size_t range_end)
+{
+    std::vector<TagName> tags;
+    ScanTagNames(source, tokens, tags);
+    for (const auto& tag : tags)
+    {
+        if (IsKeyword(tag.text)) continue;
+        if (tag.offset < range_start || tag.offset >= range_end) continue;
+        if (!prefix.empty() && !StartsWith(tag.text, prefix)) continue;
+        InsertCandidate(best, tag.text, CompletionKind::Type);
     }
 }
 
@@ -766,6 +837,8 @@ void CollectChildScopes(const ParseTree& tree, const std::vector<std::string>& q
         if (!matches) continue;
         const std::string& name = path[qualifier.size()];
         if (name.empty()) continue;
+        // Reserved (`_`-leading) scopes are never meant to be named.
+        if (name.front() == '_') continue;
         if (!prefix.empty() && !StartsWith(name, prefix)) continue;
         InsertCandidate(best, name,
                         kind == GrammarKind::NamespaceDefinition ? CompletionKind::Namespace
@@ -773,11 +846,127 @@ void CollectChildScopes(const ParseTree& tree, const std::vector<std::string>& q
     }
 }
 
-// --- Completion collectors -------------------------------------------------
+} // namespace
+
+ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOptions& options)
+{
+    const std::vector<Token> tokens = Lexer(source).Lex();
+    const ParseTree tree = ParseTree::Parse(source, options);
+    ScopeIndex index;
+    auto entry_for = [&](const std::vector<std::string>& path, CompletionKind kind) -> IndexedScope& {
+        for (auto& entry : index)
+        {
+            if (entry.path == path) return entry;
+        }
+        index.push_back({ path, kind, {} });
+        return index.back();
+    };
+    entry_for({}, CompletionKind::Keyword);
+
+    // Declared names bucketed by owning scope; function locals land on body
+    // blocks (no entry) and are skipped: they are not qualifier-addressable.
+    for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+    {
+        if (tree.Nodes()[n].kind != GrammarKind::DeclaredName) continue;
+        const std::size_t scope = MemberScope(tree, n);
+        if (scope >= tree.Nodes().size()) continue;
+        const GrammarKind scope_kind = tree.Nodes()[scope].kind;
+        if (scope_kind != GrammarKind::NamespaceDefinition && scope_kind != GrammarKind::RecordDefinition &&
+            scope != ParseTree::RootNode)
+        {
+            continue;
+        }
+        const std::size_t token_index = tree.Nodes()[n].first_token;
+        if (token_index >= tree.Tokens().size()) continue;
+        const std::string_view name = tree.Text(tree.Tokens()[token_index]);
+        if (name.empty() || IsKeyword(name)) continue;
+        const CompletionKind kind = ClassifyDeclaredName(tree, n);
+        if (kind == CompletionKind::Variable && name.front() == '_') continue;
+        IndexedScope& entry = entry_for(ScopePath(tree, scope), CompletionKind::Type);
+        entry.members.push_back({ std::string(name), kind, KindDetail(kind) });
+    }
+    // Nested scope names owned by each entry's scope.
+    for (std::size_t n = 0; n < tree.Nodes().size(); ++n)
+    {
+        const GrammarKind kind = tree.Nodes()[n].kind;
+        if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
+        {
+            continue;
+        }
+        const std::size_t owner = MemberScope(tree, n);
+        if (owner >= tree.Nodes().size()) continue;
+        const GrammarKind owner_kind = tree.Nodes()[owner].kind;
+        if (owner_kind != GrammarKind::NamespaceDefinition && owner_kind != GrammarKind::RecordDefinition &&
+            owner != ParseTree::RootNode)
+        {
+            continue;
+        }
+        const auto elements = ScopeNameElements(tree, n);
+        if (elements.empty() || elements.back().empty() || elements.back().front() == '_') continue;
+        IndexedScope& entry = entry_for(ScopePath(tree, owner), CompletionKind::Type);
+        const CompletionKind member_kind =
+            kind == GrammarKind::NamespaceDefinition ? CompletionKind::Namespace : CompletionKind::Type;
+        entry.members.push_back({ elements.back(), member_kind, KindDetail(member_kind) });
+    }
+    // Tag names bucketed by innermost enclosing named scope.
+    std::vector<TagName> tags;
+    ScanTagNames(source, tokens, tags);
+    for (const auto& tag : tags)
+    {
+        if (IsKeyword(tag.text) || tag.text.front() == '_') continue;
+        std::size_t bucket = ParseTree::RootNode;
+        std::size_t span = static_cast<std::size_t>(-1);
+        for (std::size_t n = 1; n < tree.Nodes().size(); ++n)
+        {
+            const GrammarKind kind = tree.Nodes()[n].kind;
+            if (kind != GrammarKind::NamespaceDefinition && kind != GrammarKind::RecordDefinition)
+            {
+                continue;
+            }
+            const auto [start, end] = NodeRange(tree, n);
+            if (start <= tag.offset && tag.offset < end && end - start < span)
+            {
+                bucket = n;
+                span = end - start;
+            }
+        }
+        IndexedScope& entry = entry_for(ScopePath(tree, bucket), CompletionKind::Type);
+        entry.members.push_back({ std::string(tag.text), CompletionKind::Type, "type" });
+    }
+    // Macros are always global.
+    {
+        std::unordered_map<std::string, CompletionKind> macros;
+        CollectDefines(source, tokens, macros, {});
+        IndexedScope& entry = entry_for({}, CompletionKind::Keyword);
+        for (const auto& [name, kind] : macros)
+        {
+            if (name.front() == '_') continue;
+            entry.members.push_back({ name, kind, KindDetail(kind) });
+        }
+    }
+    for (auto& entry : index)
+    {
+        std::sort(entry.members.begin(), entry.members.end(), [](const CompletionItem& left,
+                                                                 const CompletionItem& right) {
+            if (left.label != right.label) return left.label < right.label;
+            return static_cast<int>(left.kind) < static_cast<int>(right.kind);
+        });
+        entry.members.erase(
+            std::unique(entry.members.begin(), entry.members.end(),
+                        [](const CompletionItem& left, const CompletionItem& right) {
+                            return left.label == right.label && left.kind == right.kind;
+                        }),
+            entry.members.end());
+    }
+    return index;
+}
+
+namespace
+{
 
 void CompleteExpression(const ParseTree& tree, std::string_view source,
                         const std::vector<Token>& tokens, const ParserOptions& options,
-                        std::size_t offset, std::string_view prefix,
+                        std::size_t offset, std::string_view prefix, const ScopeIndex* external,
                         std::unordered_map<std::string, CompletionKind>& best)
 {
     for (const auto keyword : kKeywords)
@@ -842,6 +1031,21 @@ void CompleteExpression(const ParseTree& tree, std::string_view source,
         if (!prefix.empty() && !StartsWith(name, prefix)) continue;
         InsertCandidate(best, name, CompletionKind::Macro);
     }
+
+    // Header globals (top-level functions, macros, using-aliases) are visible
+    // unqualified once included. Namespaced header members stay qualified-only.
+    if (external != nullptr)
+    {
+        for (const auto& scope : *external)
+        {
+            if (!scope.path.empty()) continue;
+            for (const auto& member : scope.members)
+            {
+                if (!prefix.empty() && !StartsWith(member.label, prefix)) continue;
+                InsertCandidate(best, member.label, member.kind);
+            }
+        }
+    }
 }
 
 bool MatchesPrefix(std::string_view name, std::string_view prefix)
@@ -851,6 +1055,7 @@ bool MatchesPrefix(std::string_view name, std::string_view prefix)
 
 void CompleteQualified(const ParseTree& tree, std::string_view source,
                        const std::vector<Token>& tokens, std::size_t offset, std::string_view prefix,
+                       const ScopeIndex* external,
                        std::unordered_map<std::string, CompletionKind>& best)
 {
     const std::size_t scope_op = AccessOperatorBefore(source, tokens, offset, prefix);
@@ -884,11 +1089,66 @@ void CompleteQualified(const ParseTree& tree, std::string_view source,
             InsertCandidate(best, text, CompletionKind::Variable);
         }
         CollectChildScopes(tree, {}, best, prefix);
+        if (external != nullptr)
+        {
+            for (const auto& scope : *external)
+            {
+                if (scope.path.empty())
+                {
+                    for (const auto& member : scope.members)
+                    {
+                        if (!MatchesPrefix(member.label, prefix)) continue;
+                        InsertCandidate(best, member.label, member.kind);
+                    }
+                }
+                else if (scope.path.size() == 1)
+                {
+                    if (!MatchesPrefix(scope.path.front(), prefix)) continue;
+                    InsertCandidate(best, scope.path.front(), scope.kind);
+                }
+            }
+        }
         return;
     }
 
     const std::vector<std::size_t> targets = ResolveScope(tree, qualifier.path);
-    if (targets.empty()) return; // unknown qualifier (`std::`): no guesses
+    // External (header) scopes matching the qualifier union with local ones.
+    // An empty target set with no external match means an unknown qualifier.
+    bool saw_external = false;
+    if (external != nullptr)
+    {
+        for (const auto& scope : *external)
+        {
+            if (scope.path != qualifier.path) continue;
+            saw_external = true;
+            for (const auto& member : scope.members)
+            {
+                if (!MatchesPrefix(member.label, prefix)) continue;
+                InsertCandidate(best, member.label, member.kind);
+            }
+        }
+        // External nested scopes below the qualifier (`std::` offers `chrono`
+        // from a `std::chrono` header scope).
+        for (const auto& scope : *external)
+        {
+            if (scope.path.size() <= qualifier.path.size()) continue;
+            bool matches = true;
+            for (std::size_t i = 0; i < qualifier.path.size(); ++i)
+            {
+                if (scope.path[i] != qualifier.path[i])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if (!matches) continue;
+            saw_external = true;
+            const std::string& name = scope.path[qualifier.path.size()];
+            if (!MatchesPrefix(name, prefix)) continue;
+            InsertCandidate(best, name, scope.kind);
+        }
+    }
+    if (targets.empty() && !saw_external) return; // unknown qualifier (`std::`): no guesses
     auto is_target = [&](std::size_t node) {
         for (const auto target : targets)
         {
@@ -952,6 +1212,13 @@ std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source, 
 std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source,
                                                       const ParserOptions& options, std::size_t offset)
 {
+    return Complete(source, options, offset, nullptr);
+}
+
+std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source,
+                                                      const ParserOptions& options, std::size_t offset,
+                                                      const ScopeIndex* external)
+{
     if (offset > source.size()) offset = source.size();
     const std::string prefix = PrefixAt(source, offset);
     const std::vector<Token> tokens = Lexer(source).Lex();
@@ -987,11 +1254,11 @@ std::vector<CompletionItem> CompletionEngine::Complete(std::string_view source,
         const ParseTree tree = ParseTree::Parse(source, options);
         if (context == CursorContext::ScopeAccess)
         {
-            CompleteQualified(tree, source, tokens, offset, prefix, best);
+            CompleteQualified(tree, source, tokens, offset, prefix, external, best);
         }
         else
         {
-            CompleteExpression(tree, source, tokens, options, offset, prefix, best);
+            CompleteExpression(tree, source, tokens, options, offset, prefix, external, best);
         }
     }
 
