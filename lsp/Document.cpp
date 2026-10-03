@@ -5,38 +5,115 @@
 namespace heimdall::lsp
 {
 
-Position ToPosition(std::string_view text, std::size_t offset)
+void LineIndex::Build(std::string_view text)
+{
+    m_text = text;
+    m_line_starts.clear();
+    m_line_starts.push_back(0);
+    for (std::size_t i = 0; i < text.size(); ++i)
+    {
+        // A trailing '\n' starts an (empty) line at EOF, so offsets at EOF
+        // map to it and round-trip exactly.
+        if (text[i] == '\n')
+        {
+            m_line_starts.push_back(static_cast<std::uint32_t>(i + 1));
+        }
+    }
+}
+
+std::size_t LineIndex::Utf16Width(std::string_view text, std::size_t i, std::size_t stop) noexcept
+{
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    if ((c & 0x80) == 0) return 1;
+    std::size_t width = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
+    if (i + width > stop) width = stop - i;
+    std::uint32_t codepoint = c & (width == 2 ? 0x1f : width == 3 ? 0x0f : 0x07);
+    for (std::size_t j = 1; j < width; ++j)
+    {
+        codepoint = (codepoint << 6) | (static_cast<unsigned char>(text[i + j]) & 0x3f);
+    }
+    // One UTF-16 code unit below the astral planes, two (surrogate pair) above.
+    if (codepoint > 0xffff) return 2;
+    return 1;
+}
+
+Position LineIndex::ToPosition(std::size_t offset) const
 {
     Position position;
-    const std::size_t stop = offset < text.size() ? offset : text.size();
-    for (std::size_t i = 0; i < stop;)
+    if (m_line_starts.empty()) return position;
+    const std::size_t stop = offset < m_text.size() ? offset : m_text.size();
+    // Binary search for the line start, then walk only that line's width.
+    std::size_t line = 0;
     {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c == '\n')
+        std::size_t lo = 0;
+        std::size_t hi = m_line_starts.size();
+        while (lo + 1 < hi)
         {
-            ++position.line;
-            position.character = 0;
-            ++i;
-            continue;
+            const std::size_t mid = (lo + hi) / 2;
+            if (static_cast<std::size_t>(m_line_starts[mid]) <= stop)
+                lo = mid;
+            else
+                hi = mid;
         }
+        line = lo;
+    }
+    position.line = line;
+    std::size_t character = 0;
+    for (std::size_t i = m_line_starts[line]; i < stop;)
+    {
+        const unsigned char c = static_cast<unsigned char>(m_text[i]);
         if ((c & 0x80) == 0)
         {
-            ++position.character;
+            ++character;
+            ++i;
+        }
+        else
+        {
+            character += Utf16Width(m_text, i, stop);
+            std::size_t width = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
+            if (i + width > stop) width = stop - i;
+            i += width;
+        }
+    }
+    position.character = character;
+    return position;
+}
+
+std::size_t LineIndex::OffsetFromPosition(Position position) const
+{
+    if (m_line_starts.empty()) return 0;
+    // Past the last line clamps to EOF (mirrors the old linear scan).
+    if (position.line >= m_line_starts.size()) return m_text.size();
+    const std::size_t line = position.line;
+    std::size_t i = m_line_starts[line];
+    const std::size_t line_end =
+        line + 1 < m_line_starts.size() ? m_line_starts[line + 1] - 1 : m_text.size();
+    std::size_t character = 0;
+    while (i < line_end && character < position.character)
+    {
+        const unsigned char c = static_cast<unsigned char>(m_text[i]);
+        if (c == '\n') break; // past end-of-line clamps to the newline itself
+        if ((c & 0x80) == 0)
+        {
+            ++character;
             ++i;
         }
         else
         {
             std::size_t width = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
-            std::uint32_t codepoint = c & (width == 2 ? 0x1f : width == 3 ? 0x0f : 0x07);
-            for (std::size_t j = 1; j < width && i + j < stop; ++j)
-            {
-                codepoint = (codepoint << 6) | (static_cast<unsigned char>(text[i + j]) & 0x3f);
-            }
-            position.character += codepoint > 0xffff ? 2 : 1;
+            if (i + width > line_end) width = line_end - i;
+            character += Utf16Width(m_text, i, i + width);
             i += width;
         }
     }
-    return position;
+    return i;
+}
+
+Position ToPosition(std::string_view text, std::size_t offset)
+{
+    LineIndex index;
+    index.Build(text);
+    return index.ToPosition(offset);
 }
 
 std::filesystem::path PathFromUri(std::string_view uri)
@@ -75,44 +152,9 @@ void AppendPosition(Position position, std::string& out)
 
 std::size_t OffsetFromPosition(std::string_view text, Position position)
 {
-    std::size_t line = 0;
-    std::size_t character = 0;
-    std::size_t i = 0;
-    while (i < text.size())
-    {
-        if (line == position.line && character == position.character) return i;
-        // Mirror ToPosition: '\n' is the only line break; '\r' counts as a column.
-        if (line == position.line && character > position.character) return i;
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c == '\n')
-        {
-            // A position past end-of-line clamps to the newline itself.
-            if (line == position.line) return i;
-            ++line;
-            character = 0;
-            ++i;
-            continue;
-        }
-        if (line > position.line) return i;
-        if ((c & 0x80) == 0)
-        {
-            ++character;
-            ++i;
-        }
-        else
-        {
-            std::size_t width = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
-            if (i + width > text.size()) width = text.size() - i;
-            std::uint32_t codepoint = c & (width == 2 ? 0x1f : width == 3 ? 0x0f : 0x07);
-            for (std::size_t j = 1; j < width; ++j)
-            {
-                codepoint = (codepoint << 6) | (static_cast<unsigned char>(text[i + j]) & 0x3f);
-            }
-            character += codepoint > 0xffff ? 2 : 1;
-            i += width;
-        }
-    }
-    return text.size();
+    LineIndex index;
+    index.Build(text);
+    return index.OffsetFromPosition(position);
 }
 
 } // namespace heimdall::lsp

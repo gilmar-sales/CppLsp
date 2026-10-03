@@ -1,6 +1,7 @@
 #include "JsonRpc.hpp"
 
 #include <iostream>
+#include <mutex>
 
 namespace heimdall::lsp
 {
@@ -33,6 +34,10 @@ void QuoteJson(std::string_view value, std::string& out)
 
 void Send(std::string_view body)
 {
+    // Single serialized writer: diagnostics/header workers publish from
+    // background threads while the I/O thread answers requests.
+    static std::mutex send_mutex;
+    const std::lock_guard<std::mutex> lock(send_mutex);
     std::cout << "Content-Length: " << body.size() << "\r\n\r\n";
     std::cout.write(body.data(), static_cast<std::streamsize>(body.size()));
     std::cout.flush();

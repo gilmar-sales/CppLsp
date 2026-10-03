@@ -5,6 +5,8 @@
 #include <Heimdall/LineTable.hpp>
 
 #include <atomic>
+#include <memory>
+#include <optional>
 #include <thread>
 #include <unordered_set>
 
@@ -96,7 +98,11 @@ heimdall::ParserOptions ParserOptionsForFile(const std::filesystem::path& path, 
         if (const auto* command = database->Find(path); command != nullptr)
         {
             if (!options.std_override) parser_options.standard = command->standard;
-            parser_options.predefined_macros = command->defines;
+            // Shared ownership (one copy per file): the tree borrows it without
+            // further copies, and -U undefines are honored here as well.
+            auto macros = std::make_shared<heimdall::Preprocessor::MacroMap>(command->defines);
+            for (const auto& name : command->undefines) macros->erase(name);
+            parser_options.shared_macros = std::move(macros);
         }
     }
     return parser_options;
@@ -128,26 +134,29 @@ void ProcessFile(const std::filesystem::path& path, const Options& options,
         return;
     }
     const std::string_view source = buffer->view();
+    // One parse per file shared by syntax diagnostics, the rule engine and
+    // the semantic pass (was: each stage re-lexed the buffer from scratch).
+    std::optional<heimdall::ParseTree> tree;
     if (options.command == Command::Parse || options.command == Command::Lint ||
         options.command == Command::Check)
     {
         const auto parser_options = ParserOptionsForFile(path, options, database);
-        const auto tree = heimdall::ParseTree::Parse(source, parser_options);
-        result.standard_name = std::string(StandardName(tree.Standard()));
-        result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree.Diagnostics());
+        tree = heimdall::ParseTree::Parse(source, parser_options);
+        result.standard_name = std::string(StandardName(tree->Standard()));
+        result.syntax_diagnostics = ToSyntaxDiagnostics(source, tree->Diagnostics());
         if (options.command == Command::Parse)
         {
-            result.nodes.reserve(tree.Nodes().size());
-            for (const auto& node : tree.Nodes())
+            result.nodes.reserve(tree->Nodes().size());
+            for (const auto& node : tree->Nodes())
             {
                 std::size_t offset = source.size();
                 std::size_t length = 0;
-                if (node.first_token < tree.Tokens().size() && node.token_count > 0)
+                if (node.first_token < tree->Tokens().size() && node.token_count > 0)
                 {
                     const std::size_t last_index =
-                        std::min(node.first_token + node.token_count, tree.Tokens().size()) - 1;
-                    offset = tree.Tokens()[node.first_token].offset;
-                    const auto& last_token = tree.Tokens()[last_index];
+                        std::min<std::size_t>(node.first_token + node.token_count, tree->Tokens().size()) - 1;
+                    offset = tree->Tokens()[node.first_token].offset;
+                    const auto& last_token = tree->Tokens()[last_index];
                     length = last_token.offset + last_token.length - offset;
                 }
                 result.nodes.push_back({ std::string(GrammarKindName(node.kind)),
@@ -167,7 +176,8 @@ void ProcessFile(const std::filesystem::path& path, const Options& options,
             const heimdall::SemanticAnalyzer analyzer;
             const auto types = analyzer.CollectTypeNames(source, command);
             result.type_count = types.size();
-            result.semantic_diagnostics = analyzer.AnalyzeUnusedLocals(source, command);
+            result.semantic_diagnostics = tree ? analyzer.AnalyzeUnusedLocals(*tree, command)
+                                              : analyzer.AnalyzeUnusedLocals(source, command);
             std::unordered_set<std::string> no_values;
             std::size_t line_start = 0;
             while (line_start < source.size())
@@ -188,12 +198,13 @@ void ProcessFile(const std::filesystem::path& path, const Options& options,
     }
     if (options.command == Command::Format)
     {
-        result.output = heimdall::Formatter().Format(source);
+        result.output = tree ? heimdall::Formatter().Format(*tree) : heimdall::Formatter().Format(source);
         result.changed = result.output != source;
     }
     else
     {
-        result.diagnostics = heimdall::RuleEngine().Analyze(source);
+        result.diagnostics =
+            tree ? heimdall::RuleEngine().Analyze(*tree) : heimdall::RuleEngine().Analyze(source);
         if (options.fix && !result.diagnostics.empty())
         {
             result.output = heimdall::RuleEngine::ApplyFixes(source, result.diagnostics);

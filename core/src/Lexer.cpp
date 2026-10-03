@@ -254,7 +254,8 @@ std::vector<Token> Lexer::Lex() const
             }
         }
 
-        tokens.push_back({ kind, start, i - start });
+        tokens.push_back({ kind, static_cast<std::uint32_t>(start),
+                            static_cast<std::uint32_t>(i - start) });
     }
     return tokens;
 }

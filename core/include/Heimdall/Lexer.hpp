@@ -22,17 +22,13 @@ enum class TokenKind : std::uint8_t
     Unknown
 };
 
-// Token positions are byte offsets into the original source; no text is copied.
 struct Token
 {
     TokenKind kind;
-    std::size_t offset;
-    std::size_t length;
+    std::uint32_t offset;
+    std::uint32_t length;
 };
 
-// Lossless lexer: every source byte belongs to exactly one token, including
-// whitespace and comments. Unterminated literals/comments become tokens up to
-// EOF, allowing callers to continue analysis on malformed files.
 class Lexer
 {
   public:

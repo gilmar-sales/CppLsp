@@ -41,6 +41,34 @@ struct SignificantToken
     std::size_t offset;
 };
 
+// Non-owning preprocessor over the command's defines: avoids the deep copy
+// of the macro map per call. A filtered copy is built only when the command
+// carries -U undefines.
+Preprocessor MakePreprocessor(const CompileCommand* command)
+{
+    static const Preprocessor::MacroMap kEmpty;
+    if (command == nullptr) return Preprocessor(kEmpty);
+    if (command->undefines.empty()) return Preprocessor(command->defines);
+    Preprocessor::MacroMap filtered = command->defines;
+    for (const auto& name : command->undefines) filtered.erase(name);
+    return Preprocessor(std::make_shared<const Preprocessor::MacroMap>(std::move(filtered)));
+}
+
+std::vector<std::string_view> SignificantViews(std::string_view source, const std::vector<Token>& tokens)
+{
+    std::vector<std::string_view> result;
+    result.reserve(tokens.size());
+    for (const auto& token : tokens)
+    {
+        if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
+            token.kind != TokenKind::BlockComment)
+        {
+            result.push_back(source.substr(token.offset, token.length));
+        }
+    }
+    return result;
+}
+
 bool IsModifier(std::string_view token)
 {
     return token == "const" || token == "volatile" || token == "static" || token == "constexpr" ||
@@ -84,11 +112,16 @@ bool IsFunctionBody(const std::vector<SignificantToken>& tokens, std::size_t ope
 std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNames(std::string_view source,
                                                                    const CompileCommand* command) const
 {
+    return CollectTypeNamesFromViews(SignificantViews(source, Lexer(source).Lex()), command);
+}
+
+std::unordered_set<std::string> SemanticAnalyzer::CollectTypeNamesFromViews(
+    const std::vector<std::string_view>& tokens, const CompileCommand* command) const
+{
     std::unordered_set<std::string> types = {
         "void", "bool", "char", "wchar_t", "char8_t", "char16_t", "char32_t", "short", "int", "long",
         "signed", "unsigned", "float", "double", "auto", "size_t", "std::size_t"
     };
-    const auto tokens = SignificantTokens(source);
     for (std::size_t i = 0; i + 1 < tokens.size(); ++i)
     {
         if (tokens[i] == "enum" && i + 2 < tokens.size() &&
@@ -133,17 +166,29 @@ AsteriskMeaning SemanticAnalyzer::ClassifyAsteriskStatement(
 std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(std::string_view source,
                                                                       const CompileCommand* command) const
 {
-    Preprocessor::MacroMap predefined;
-    if (command != nullptr)
-    {
-        predefined = command->defines;
-        for (const auto& name : command->undefines) predefined.erase(name);
-    }
-    const auto preprocessing = Preprocessor(std::move(predefined)).Process(source);
+    const auto preprocessing = MakePreprocessor(command).Process(source);
+    return AnalyzeUnusedLocalsImpl(source, Lexer(source).Lex(), preprocessing, command);
+}
 
+std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(const ParseTree& tree,
+                                                                      const CompileCommand* command) const
+{
+    // Only the active-range mask is recomputed (a cheap line scan); the
+    // tokens themselves are reused from the tree (saves 2 full lexes).
+    const auto preprocessing = MakePreprocessor(command).Process(tree.Source());
+    return AnalyzeUnusedLocalsImpl(tree.Source(), tree.Tokens(), preprocessing, command);
+}
+
+std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocalsImpl(
+    std::string_view source, const std::vector<Token>& lexed, const PreprocessorResult& preprocessing,
+    const CompileCommand* command) const
+{
     std::vector<SignificantToken> tokens;
+    tokens.reserve(lexed.size());
+    std::vector<std::string_view> views;
+    views.reserve(lexed.size());
     std::size_t active_cursor = 0;
-    for (const auto& token : Lexer(source).Lex())
+    for (const auto& token : lexed)
     {
         while (active_cursor < preprocessing.active_ranges.size() &&
                preprocessing.active_ranges[active_cursor].offset + preprocessing.active_ranges[active_cursor].length <=
@@ -160,10 +205,11 @@ std::vector<SemanticDiagnostic> SemanticAnalyzer::AnalyzeUnusedLocals(std::strin
             token.kind != TokenKind::BlockComment)
         {
             tokens.push_back({ source.substr(token.offset, token.length), token.kind, token.offset });
+            views.push_back(source.substr(token.offset, token.length));
         }
     }
 
-    const auto known_types = CollectTypeNames(source, command);
+    const auto known_types = CollectTypeNamesFromViews(views, command);
     struct ScopeFrame
     {
         bool class_body;

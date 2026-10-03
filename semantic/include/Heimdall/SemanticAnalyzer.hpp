@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Heimdall/CompileDatabase.hpp>
+#include <Heimdall/ParseTree.hpp>
 
 #include <cstdint>
 #include <string>
@@ -43,6 +44,18 @@ class SemanticAnalyzer
 
     std::vector<SemanticDiagnostic> AnalyzeUnusedLocals(std::string_view source,
                                                         const CompileCommand* command = nullptr) const;
+    // ParseTree-backed overload: reuses the tree's tokens and directives
+    // instead of re-lexing + re-processing the same buffer.
+    std::vector<SemanticDiagnostic> AnalyzeUnusedLocals(const ParseTree& tree,
+                                                        const CompileCommand* command = nullptr) const;
+
+  private:
+    std::unordered_set<std::string> CollectTypeNamesFromViews(const std::vector<std::string_view>& tokens,
+                                                              const CompileCommand* command) const;
+    std::vector<SemanticDiagnostic> AnalyzeUnusedLocalsImpl(std::string_view source,
+                                                            const std::vector<Token>& lexed,
+                                                            const PreprocessorResult& preprocessing,
+                                                            const CompileCommand* command) const;
 };
 
 } // namespace heimdall

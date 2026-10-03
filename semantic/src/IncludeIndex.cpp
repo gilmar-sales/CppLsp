@@ -4,9 +4,12 @@
 #include <Heimdall/ParseTree.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -365,14 +368,43 @@ IncludeIndex IncludeIndex::Build(const std::vector<std::filesystem::path>& heade
     if (command != nullptr)
     {
         options.standard = command->standard;
-        options.predefined_macros = command->defines;
-        for (const auto& name : command->undefines) options.predefined_macros.erase(name);
+        options.shared_macros = std::make_shared<const Preprocessor::MacroMap>(command->defines);
+        if (!command->undefines.empty())
+        {
+            auto filtered = std::make_shared<Preprocessor::MacroMap>(command->defines);
+            for (const auto& name : command->undefines) filtered->erase(name);
+            options.shared_macros = std::move(filtered);
+        }
     }
-    for (const auto& header : headers)
+    // Headers are independent: read + parse them on a worker fan-out, then
+    // merge serially. IndexScopes is a pure function of (content, options),
+    // so concurrent calls only share read-only state.
+    std::vector<ScopeIndex> per_header(headers.size());
+    if (!headers.empty())
     {
-        const std::string content = ReadFile(header, limits.max_file_bytes);
-        if (content.empty()) continue;
-        for (const auto& scope : CompletionEngine::IndexScopes(content, options))
+        unsigned workers = std::thread::hardware_concurrency();
+        if (workers == 0) workers = 4;
+        workers = std::min<unsigned>(workers, static_cast<unsigned>(headers.size()));
+        std::atomic<std::size_t> next = 0;
+        std::vector<std::jthread> pool;
+        pool.reserve(workers);
+        for (unsigned w = 0; w < workers; ++w)
+        {
+            pool.emplace_back([&] {
+                while (true)
+                {
+                    const std::size_t h = next.fetch_add(1, std::memory_order_relaxed);
+                    if (h >= headers.size()) return;
+                    const std::string content = ReadFile(headers[h], limits.max_file_bytes);
+                    if (content.empty()) continue;
+                    per_header[h] = CompletionEngine::IndexScopes(content, options);
+                }
+            });
+        }
+    }
+    for (const auto& scopes : per_header)
+    {
+        for (const auto& scope : scopes)
         {
             if (!scope.path.empty())
             {

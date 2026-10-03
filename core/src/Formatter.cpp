@@ -33,6 +33,17 @@ std::string Formatter::Format(std::string_view source) const
 {
     const auto tokens = Lexer(source).Lex();
     const auto directives = Preprocessor().Process(source).directives;
+    return FormatImpl(source, tokens, directives);
+}
+
+std::string Formatter::Format(const ParseTree& tree) const
+{
+    return FormatImpl(tree.Source(), tree.Tokens(), tree.Directives());
+}
+
+std::string Formatter::FormatImpl(std::string_view source, const std::vector<Token>& tokens,
+                                  const std::vector<PreprocessorDirective>& directives) const
+{
     std::string output;
     output.reserve(source.size() + source.size() / 8);
 

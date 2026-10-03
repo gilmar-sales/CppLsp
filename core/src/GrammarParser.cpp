@@ -1,6 +1,9 @@
 #include <Heimdall/ParseTree.hpp>
 #include "detail/GrammarParser.hpp"
 
+#include <array>
+#include <cstddef>
+#include <memory_resource>
 #include <string_view>
 #include <vector>
 
@@ -33,8 +36,14 @@ class GrammarParser
                 token.kind != TokenKind::BlockComment)
                 m_sig.push_back(i);
         }
+        m_sig_text.reserve(m_sig.size());
+        for (const std::size_t token_index : m_sig)
+        {
+            const auto& token = tree.m_tokens[token_index];
+            m_sig_text.push_back(tree.m_source.substr(token.offset, token.length));
+        }
         m_match.resize(m_sig.size(), Invalid);
-        std::vector<std::size_t> stack;
+        std::pmr::vector<std::size_t> stack(&m_scratch);
         for (std::size_t i = 0; i < m_sig.size(); ++i)
         {
             const auto t = Text(i);
@@ -53,22 +62,34 @@ class GrammarParser
 
     void Run()
     {
-        m_tree.m_nodes.push_back({ GrammarKind::TranslationUnit, 0, m_tree.m_tokens.size(), ParseTree::RootNode });
+        m_tree.m_nodes.push_back({ GrammarKind::TranslationUnit, 0,
+                                   static_cast<std::uint32_t>(m_tree.m_tokens.size()),
+                                   static_cast<std::uint32_t>(ParseTree::RootNode), 1 });
         ParseScope(0, m_sig.size(), ParseTree::RootNode, false);
     }
 
   private:
     static constexpr std::size_t Invalid = static_cast<std::size_t>(-1);
+    // Bump-allocated scratch for the significant-token tables (same principle
+    // as heimdall::Arena): small files never touch the heap for parser
+    // temporaries; the whole scratch is released at once with the parser.
+    // Declared before the vectors so it outlives them.
+    alignas(alignof(std::max_align_t)) std::array<std::byte, 32 * 1024> m_scratch_buffer {};
+    std::pmr::monotonic_buffer_resource m_scratch { m_scratch_buffer.data(),
+                                                    m_scratch_buffer.size() };
     ParseTree& m_tree;
-    std::vector<std::size_t> m_sig;
-    std::vector<std::size_t> m_match;
+    std::pmr::vector<std::size_t> m_sig { &m_scratch };
+    // Cached source slice per significant token: Text()/Is() become a single
+    // vector load instead of a 3-hop pointer chase (m_sig -> m_tokens ->
+    // m_source) on every parser decision.
+    std::pmr::vector<std::string_view> m_sig_text { &m_scratch };
+    std::pmr::vector<std::size_t> m_match { &m_scratch };
     std::size_t m_last_expression_node = Invalid;
 
     std::string_view Text(std::size_t sig) const
     {
-        if (sig >= m_sig.size()) return {};
-        const auto& token = m_tree.m_tokens[m_sig[sig]];
-        return m_tree.m_source.substr(token.offset, token.length);
+        if (sig >= m_sig_text.size()) return {};
+        return m_sig_text[sig];
     }
 
     static bool Closes(std::string_view open, std::string_view close)
@@ -81,11 +102,25 @@ class GrammarParser
     {
         const std::size_t first = begin < m_sig.size() ? m_sig[begin] : m_tree.m_tokens.size();
         const std::size_t past = end > begin && end - 1 < m_sig.size() ? m_sig[end - 1] + 1 : first;
-        m_tree.m_nodes.push_back({ kind, first, past - first, parent });
+        const std::uint32_t index = static_cast<std::uint32_t>(m_tree.m_nodes.size());
+        m_tree.m_nodes.push_back({ kind, static_cast<std::uint32_t>(first),
+                                   static_cast<std::uint32_t>(past - first),
+                                   static_cast<std::uint32_t>(parent), index + 1 });
         return m_tree.m_nodes.size() - 1;
     }
 
-    bool Is(std::size_t i, std::string_view text) const { return Text(i) == text; }
+    bool Is(std::size_t i, std::string_view text) const
+    {
+        if (i >= m_sig_text.size()) return false;
+        // Single-character punctuators (the hottest checks: brackets, `;`,
+        // `,`, `*`) skip memcmp via a length + first-byte comparison.
+        if (text.size() == 1)
+        {
+            const auto candidate = m_sig_text[i];
+            return candidate.size() == 1 && candidate[0] == text[0];
+        }
+        return m_sig_text[i] == text;
+    }
 
     void SetNodeRange(std::size_t node, std::size_t begin, std::size_t end)
     {

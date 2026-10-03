@@ -34,14 +34,25 @@ Diagnostic MakeDiagnostic(RuleId rule, std::string code, std::string message, st
 
 std::vector<Diagnostic> RuleEngine::Analyze(std::string_view source) const
 {
+    const auto tokens = Lexer(source).Lex();
+    const auto directives = Preprocessor().Process(source).directives;
+    return AnalyzeImpl(source, tokens, directives);
+}
+
+std::vector<Diagnostic> RuleEngine::Analyze(const ParseTree& tree) const
+{
+    return AnalyzeImpl(tree.Source(), tree.Tokens(), tree.Directives());
+}
+
+std::vector<Diagnostic> RuleEngine::AnalyzeImpl(std::string_view source, const std::vector<Token>& tokens,
+                                               const std::vector<PreprocessorDirective>& directives) const
+{
     std::vector<Diagnostic> diagnostics;
     LineTable lines;
     lines.Build(source);
 
     if (m_options.null_macro)
     {
-        const auto tokens = Lexer(source).Lex();
-        const auto directives = Preprocessor().Process(source).directives;
         std::size_t directive_cursor = 0;
         for (const auto& token : tokens)
         {
