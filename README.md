@@ -129,8 +129,11 @@ outside the extension) still needs to be closed before relinking.
   in function bodies (built-in/current-file types); complex declarators, parameters,
   captures, shadowing and include-provided types are outside the current subset.
 - **Formatter foundation**: brace-depth indentation using lexer tokens, configurable
-  spaces/tabs, preserving CRLF, blank lines, comments, literals, and preprocessor
-  directives. It intentionally does not yet reflow lines or normalize operator spacing.
+  spaces/tabs, with scope-aware dedents for access specifiers (`public:`),
+  switch labels (`case:`/`default:`) and goto labels, collapsing blank-line
+  runs to `max_empty_lines` (default 1, edges trimmed), preserving CRLF,
+  comments, literals, and preprocessor directives. It intentionally does
+  not yet reflow lines or normalize operator spacing.
 - **Compilation database / semantic seed**: `heimdall_semantic` uses Skirnir's
   `JsonFileSource` (backed by `simdjson`) to read `compile_commands.json` (`arguments` or `command`) and
   extracts `-D`, `-U`, and `-I` options. Its local type oracle recognizes built-ins
