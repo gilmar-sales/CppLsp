@@ -3,8 +3,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory_resource>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace heimdall
@@ -34,7 +36,7 @@ class GrammarParser
                                    preprocessing.directives[directive_cursor].offset <= token.offset;
             if ((active || directive) && token.kind != TokenKind::Whitespace && token.kind != TokenKind::LineComment &&
                 token.kind != TokenKind::BlockComment)
-                m_sig.push_back(i);
+                m_sig.push_back(static_cast<std::uint32_t>(i));
         }
         m_sig_text.reserve(m_sig.size());
         for (const std::size_t token_index : m_sig)
@@ -43,8 +45,9 @@ class GrammarParser
             m_sig_text.push_back(tree.m_source.substr(token.offset, token.length));
         }
         m_match.resize(m_sig.size(), Invalid);
-        std::pmr::vector<std::size_t> stack(&m_scratch);
-        for (std::size_t i = 0; i < m_sig.size(); ++i)
+
+        std::pmr::vector<std::uint32_t> stack(&m_scratch);
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(m_sig.size()); ++i)
         {
             const auto t = Text(i);
             if (t == "(" || t == "[" || t == "{") stack.push_back(i);
@@ -55,6 +58,31 @@ class GrammarParser
                     m_match[i] = stack.back();
                     m_match[stack.back()] = i;
                     stack.pop_back();
+                }
+                else if (!stack.empty())
+                {
+                    std::size_t found = stack.size();
+                    for (std::size_t k = stack.size(); k > 0; --k)
+                    {
+                        if (Closes(Text(stack[k - 1]), t))
+                        {
+                            found = k - 1;
+                            break;
+                        }
+                    }
+                    if (found < stack.size())
+                    {
+                        for (std::size_t k = found + 1; k < stack.size(); ++k)
+                        {
+                            const std::uint32_t open_tok = m_sig[stack[k]];
+                            tree.m_diagnostics.push_back(
+                                { tree.m_tokens[open_tok].offset, "unclosed delimiter" });
+                        }
+                        m_match[i] = stack[found];
+                        m_match[stack[found]] = i;
+                        stack.erase(stack.begin() + static_cast<std::ptrdiff_t>(found),
+                                    stack.end());
+                    }
                 }
             }
         }
@@ -69,22 +97,17 @@ class GrammarParser
     }
 
   private:
-    static constexpr std::size_t Invalid = static_cast<std::size_t>(-1);
-    // Bump-allocated scratch for the significant-token tables (same principle
-    // as heimdall::Arena): small files never touch the heap for parser
-    // temporaries; the whole scratch is released at once with the parser.
-    // Declared before the vectors so it outlives them.
-    alignas(alignof(std::max_align_t)) std::array<std::byte, 32 * 1024> m_scratch_buffer {};
+    static constexpr std::uint32_t Invalid = static_cast<std::uint32_t>(-1);
+
+    alignas(alignof(std::max_align_t)) std::array<std::byte, 32 * 1024> m_scratch_buffer;
     std::pmr::monotonic_buffer_resource m_scratch { m_scratch_buffer.data(),
                                                     m_scratch_buffer.size() };
     ParseTree& m_tree;
-    std::pmr::vector<std::size_t> m_sig { &m_scratch };
-    // Cached source slice per significant token: Text()/Is() become a single
-    // vector load instead of a 3-hop pointer chase (m_sig -> m_tokens ->
-    // m_source) on every parser decision.
+    std::pmr::vector<std::uint32_t> m_sig { &m_scratch };
+
     std::pmr::vector<std::string_view> m_sig_text { &m_scratch };
-    std::pmr::vector<std::size_t> m_match { &m_scratch };
-    std::size_t m_last_expression_node = Invalid;
+    std::pmr::vector<std::uint32_t> m_match { &m_scratch };
+    std::uint32_t m_last_expression_node = Invalid;
 
     std::string_view Text(std::size_t sig) const
     {
@@ -112,8 +135,7 @@ class GrammarParser
     bool Is(std::size_t i, std::string_view text) const
     {
         if (i >= m_sig_text.size()) return false;
-        // Single-character punctuators (the hottest checks: brackets, `;`,
-        // `,`, `*`) skip memcmp via a length + first-byte comparison.
+
         if (text.size() == 1)
         {
             const auto candidate = m_sig_text[i];
@@ -134,9 +156,9 @@ class GrammarParser
     {
         if (sig >= m_sig.size() || (!Is(sig, "#") && !Is(sig, "%:"))) return false;
         const auto offset = m_tree.m_tokens[m_sig[sig]].offset;
-        const auto line_start = offset == 0 ? 0 : m_tree.m_source.rfind('\n', offset - 1) == std::string_view::npos
-                                                     ? 0
-                                                     : m_tree.m_source.rfind('\n', offset - 1) + 1;
+
+        const auto nl = offset == 0 ? std::string_view::npos : m_tree.m_source.rfind('\n', offset - 1);
+        const auto line_start = nl == std::string_view::npos ? 0 : nl + 1;
         for (auto i = line_start; i < offset; ++i)
             if (m_tree.m_source[i] != ' ' && m_tree.m_source[i] != '\t' && m_tree.m_source[i] != '\r') return false;
         return true;
@@ -240,19 +262,100 @@ class GrammarParser
 
     static bool IsBuiltinType(std::string_view text)
     {
-        return text == "void" || text == "bool" || text == "char" || text == "char8_t" ||
-               text == "char16_t" || text == "char32_t" || text == "wchar_t" || text == "short" ||
-               text == "int" || text == "long" || text == "signed" || text == "unsigned" ||
-               text == "float" || text == "double" || text == "auto" || text == "decltype";
+        switch (text.size())
+        {
+            case 3: return text == "int";
+            case 4:
+                switch (text[0])
+                {
+                    case 'v': return text == "void";
+                    case 'b': return text == "bool";
+                    case 'c': return text == "char";
+                    case 'l': return text == "long";
+                    case 'a': return text == "auto";
+                    default: return false;
+                }
+            case 5:
+                switch (text[0])
+                {
+                    case 's': return text == "short";
+                    case 'f': return text == "float";
+                    default: return false;
+                }
+            case 6:
+                switch (text[0])
+                {
+                    case 'd': return text == "double";
+                    case 's': return text == "signed";
+                    default: return false;
+                }
+            case 7:
+                switch (text[0])
+                {
+                    case 'w': return text == "wchar_t";
+                    case 'c': return text == "char8_t";
+                    default: return false;
+                }
+            case 8:
+                switch (text[0])
+                {
+                    case 'u': return text == "unsigned";
+                    case 'c': return text == "char16_t" || text == "char32_t";
+                    case 'd': return text == "decltype";
+                    default: return false;
+                }
+            default: return false;
+        }
     }
 
     static bool IsDeclSpecifierKeyword(std::string_view text)
     {
-        return IsBuiltinType(text) || text == "const" || text == "volatile" || text == "static" ||
-               text == "extern" || text == "inline" || text == "constexpr" || text == "consteval" ||
-               text == "constinit" || text == "virtual" || text == "friend" || text == "typedef" ||
-               text == "thread_local" || text == "mutable" || text == "explicit" || text == "typename" ||
-               text == "struct" || text == "class" || text == "union" || text == "enum";
+        if (IsBuiltinType(text)) return true;
+
+        switch (text.size())
+        {
+            case 4: return text == "enum";
+            case 5:
+                switch (text[0])
+                {
+                    case 'c': return text == "const" || text == "class";
+                    case 'u': return text == "union";
+                    default: return false;
+                }
+            case 6:
+                switch (text[0])
+                {
+                    case 's': return text == "static" || text == "struct";
+                    case 'e': return text == "extern";
+                    case 'i': return text == "inline";
+                    case 'f': return text == "friend";
+                    default: return false;
+                }
+            case 7:
+                switch (text[0])
+                {
+                    case 'v': return text == "virtual";
+                    case 't': return text == "typedef";
+                    case 'm': return text == "mutable";
+                    default: return false;
+                }
+            case 8:
+                switch (text[0])
+                {
+                    case 'v': return text == "volatile";
+                    case 'e': return text == "explicit";
+                    case 't': return text == "typename";
+                    default: return false;
+                }
+            case 9:
+                switch (text[0])
+                {
+                    case 'c': return text == "constexpr" || text == "consteval" || text == "constinit";
+                    default: return false;
+                }
+            case 12: return text == "thread_local";
+            default: return false;
+        }
     }
 
     static bool IsDeclarationStartKeyword(std::string_view text)
@@ -294,6 +397,13 @@ class GrammarParser
 
     std::size_t FindTopLevelRequires(std::size_t begin, std::size_t end) const
     {
+        std::unordered_map<std::size_t, std::size_t> close_cache;
+        auto template_close = [&](std::size_t open) -> std::size_t {
+            if (const auto hit = close_cache.find(open); hit != close_cache.end()) return hit->second;
+            const std::size_t close = FindTemplateClose(open, end);
+            close_cache.emplace(open, close);
+            return close;
+        };
         std::size_t angle_depth = 0;
         for (auto i = begin; i < end;)
         {
@@ -305,7 +415,7 @@ class GrammarParser
             if (Is(i, "<") && i > begin &&
                 (IsIdentifierToken(i - 1) || Is(i - 1, ">") || Is(i - 1, ">>")))
             {
-                const auto close = FindTemplateClose(i, end);
+                const auto close = template_close(i);
                 if (close != Invalid)
                 {
                     ++angle_depth;
@@ -1283,14 +1393,14 @@ class GrammarParser
         }
         else if (first == "[" && m_match[pos] != Invalid && m_match[pos] < end)
         {
-            const auto capture_close = m_match[pos];
-            auto body = capture_close + 1;
+            const std::size_t capture_close = m_match[pos];
+            std::size_t body = capture_close + 1;
             if (Is(body, "(")) body = SkipGroup(body, end);
             while (body < end && !Is(body, "{") && !Is(body, ";")) ++body;
             if (Is(body, "{") && m_match[body] != Invalid)
             {
                 const auto lambda = Add(GrammarKind::LambdaExpression, pos, m_match[body] + 1, parent);
-                auto body_pos = body;
+                std::size_t body_pos = body;
                 ParseCompound(body_pos, m_match[body] + 1, lambda);
                 pos = m_match[body] + 1;
                 root = lambda;

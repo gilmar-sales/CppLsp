@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace heimdall
@@ -24,11 +25,10 @@ ParseTree ParseTree::Parse(std::string_view source, const ParserOptions& options
     tree.m_source = source;
     tree.m_standard = options.standard;
     tree.m_tokens = Lexer(source).Lex();
-    const auto preprocessing = Preprocessor(options.Macros()).Process(source);
-    tree.m_directives = preprocessing.directives;
+    auto preprocessing = Preprocessor(options.Macros()).Process(source);
     detail::ParseWithGrammar(tree, preprocessing);
-    // Pre-order subtree ranges (see SyntaxTree.cpp): parents precede
-    // children, so one reverse pass propagates each end upward.
+    tree.m_directives = std::move(preprocessing.directives);
+
     for (std::size_t n = 0; n < tree.m_nodes.size(); ++n)
         tree.m_nodes[n].subtree_end = static_cast<std::uint32_t>(n + 1);
     for (std::size_t n = tree.m_nodes.size(); n > 1; --n)

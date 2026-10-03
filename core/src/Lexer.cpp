@@ -1,29 +1,65 @@
 #include <Heimdall/Lexer.hpp>
 
+#include <array>
+#include <cstdint>
+
 namespace heimdall
 {
 
 namespace
 {
 
-constexpr bool IsSpace(char c)
+// F10: single 256-entry lookup replaces the IsSpace/IsIdentStart/
+// IsIdentContinue comparison chains on every character.
+namespace CharBits
 {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+constexpr std::uint8_t kSpace = 1 << 0;
+constexpr std::uint8_t kIdentStart = 1 << 1;
+constexpr std::uint8_t kIdentCont = 1 << 2;
+constexpr std::uint8_t kDigit = 1 << 3;
+constexpr std::uint8_t kHex = 1 << 4;
+constexpr std::uint8_t kPunct = 1 << 5;
+} // namespace CharBits
+
+constexpr std::array<std::uint8_t, 256> BuildCharClass()
+{
+    std::array<std::uint8_t, 256> table {};
+    for (int i = 0; i < 256; ++i)
+    {
+        const char c = static_cast<char>(i);
+        std::uint8_t bits = 0;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v')
+            bits |= CharBits::kSpace;
+        const bool ident_start = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || i >= 0x80;
+        if (ident_start) bits |= CharBits::kIdentStart | CharBits::kIdentCont;
+        if (c >= '0' && c <= '9') bits |= CharBits::kIdentCont | CharBits::kDigit | CharBits::kHex;
+        if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) bits |= CharBits::kHex;
+        constexpr std::string_view punct = "{}[]#()<>%:;.?*+-/^&|~!=,\\\"'";
+        if (punct.find(c) != std::string_view::npos) bits |= CharBits::kPunct;
+        table[i] = bits;
+    }
+    return table;
 }
 
-constexpr bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+constexpr std::array<std::uint8_t, 256> kCharClass = BuildCharClass();
+
+constexpr bool IsSpace(char c) { return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kSpace) != 0; }
+
+constexpr bool IsDigit(char c) { return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kDigit) != 0; }
 
 constexpr bool IsIdentStart(char c)
 {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
-           static_cast<unsigned char>(c) >= 0x80;
+    return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kIdentStart) != 0;
 }
 
-constexpr bool IsIdentContinue(char c) { return IsIdentStart(c) || IsDigit(c); }
+constexpr bool IsIdentContinue(char c)
+{
+    return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kIdentCont) != 0;
+}
 
 constexpr bool IsHexDigit(char c)
 {
-    return IsDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kHex) != 0;
 }
 
 std::size_t ScanQuoted(std::string_view s, std::size_t i, char quote)
@@ -31,12 +67,6 @@ std::size_t ScanQuoted(std::string_view s, std::size_t i, char quote)
     ++i;
     while (i < s.size())
     {
-        // An unterminated quote must not swallow the rest of the file while
-        // the user is typing: stop at the line break like clang/rustc do.
-        // A `\` + newline continuation was already consumed as an escape
-        // above, so a raw newline here always terminates the literal.
-        // The newline itself starts the next (whitespace) token, keeping the
-        // lexer lossless.
         if (s[i] == '\n' || s[i] == '\r') break;
         if (s[i] == '\\')
         {
@@ -74,8 +104,7 @@ std::size_t ScanRawString(std::string_view s, std::size_t quote)
 
 bool IsPunctuatorStart(char c)
 {
-    constexpr std::string_view punct = "{}[]#()<>%:;.?*+-/^&|~!=,\\\"'";
-    return punct.find(c) != std::string_view::npos;
+    return (kCharClass[static_cast<unsigned char>(c)] & CharBits::kPunct) != 0;
 }
 
 std::size_t PunctuatorLength(std::string_view source, std::size_t offset)

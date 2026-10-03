@@ -92,9 +92,6 @@ void ParseOption(CompileCommand& command, std::string_view arg, std::string_view
         if (!next.empty()) { parse_quote(next); consume_next = true; }
     }
     else if (arg.starts_with("-iquote")) parse_quote(arg.substr(7));
-    // -isystem/-idirafter share ordinary search semantics here; keeping them
-    // in the general directories is a simplification of the true -I/-isystem
-    // ordering, documented for include resolution.
     else if (arg == "-isystem" || arg == "-idirafter")
     {
         if (!next.empty()) { parse_include(next); consume_next = true; }

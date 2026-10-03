@@ -17,6 +17,8 @@ add_executable(CoreBench
   src/LexerBench.cpp
   src/PreprocessorBench.cpp
   src/RuleEngineBench.cpp
+  src/ParserBench.cpp
+  src/CompletionBench.cpp
 )
 
 target_link_libraries(CoreBench PRIVATE heimdall::core benchmark::benchmark benchmark::benchmark_main)

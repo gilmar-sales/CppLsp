@@ -84,13 +84,13 @@ namespace heimdall
         {
             switch (kind)
             {
-                case CompletionKind::Macro: return 5;
-                case CompletionKind::Type:
-                case CompletionKind::Namespace: return 4;
-                case CompletionKind::Function: return 3;
-                case CompletionKind::Variable: return 2;
-                case CompletionKind::Directive: return 2;
-                case CompletionKind::Keyword: return 1;
+            case CompletionKind::Macro: return 5;
+            case CompletionKind::Type:
+            case CompletionKind::Namespace: return 4;
+            case CompletionKind::Function: return 3;
+            case CompletionKind::Variable: return 2;
+            case CompletionKind::Directive: return 2;
+            case CompletionKind::Keyword: return 1;
             }
             return 0;
         }
@@ -99,13 +99,13 @@ namespace heimdall
         {
             switch (kind)
             {
-                case CompletionKind::Keyword: return "keyword";
-                case CompletionKind::Type: return "type";
-                case CompletionKind::Namespace: return "namespace";
-                case CompletionKind::Function: return "function";
-                case CompletionKind::Variable: return "variable";
-                case CompletionKind::Macro: return "macro";
-                case CompletionKind::Directive: return "directive";
+            case CompletionKind::Keyword: return "keyword";
+            case CompletionKind::Type: return "type";
+            case CompletionKind::Namespace: return "namespace";
+            case CompletionKind::Function: return "function";
+            case CompletionKind::Variable: return "variable";
+            case CompletionKind::Macro: return "macro";
+            case CompletionKind::Directive: return "directive";
             }
             return "";
         }
@@ -332,7 +332,6 @@ namespace heimdall
             }
         }
 
-
         // --- Scope-aware name resolution -------------------------------------------
         // Unqualified lookup walks the scope chain (block, function, namespace,
         // global) honoring the point of declaration; qualified lookup (`ns::name`)
@@ -344,13 +343,13 @@ namespace heimdall
         {
             switch (kind)
             {
-                case GrammarKind::TranslationUnit:
-                case GrammarKind::NamespaceDefinition:
-                case GrammarKind::RecordDefinition:
-                case GrammarKind::FunctionDefinition:
-                case GrammarKind::CompoundStatement:
-                case GrammarKind::LambdaExpression: return true;
-                default: return false;
+            case GrammarKind::TranslationUnit:
+            case GrammarKind::NamespaceDefinition:
+            case GrammarKind::RecordDefinition:
+            case GrammarKind::FunctionDefinition:
+            case GrammarKind::CompoundStatement:
+            case GrammarKind::LambdaExpression: return true;
+            default: return false;
             }
         }
 
@@ -371,19 +370,19 @@ namespace heimdall
         {
             switch (kind)
             {
-                case GrammarKind::ParameterDeclaration:
-                case GrammarKind::CompoundStatement:
-                case GrammarKind::DeclarationStatement:
-                case GrammarKind::ExpressionStatement:
-                case GrammarKind::ReturnStatement:
-                case GrammarKind::IfStatement:
-                case GrammarKind::LoopStatement:
-                case GrammarKind::SwitchStatement:
-                case GrammarKind::CaseLabel:
-                case GrammarKind::TryStatement:
-                case GrammarKind::DoStatement:
-                case GrammarKind::LambdaExpression: return true;
-                default: return false;
+            case GrammarKind::ParameterDeclaration:
+            case GrammarKind::CompoundStatement:
+            case GrammarKind::DeclarationStatement:
+            case GrammarKind::ExpressionStatement:
+            case GrammarKind::ReturnStatement:
+            case GrammarKind::IfStatement:
+            case GrammarKind::LoopStatement:
+            case GrammarKind::SwitchStatement:
+            case GrammarKind::CaseLabel:
+            case GrammarKind::TryStatement:
+            case GrammarKind::DoStatement:
+            case GrammarKind::LambdaExpression: return true;
+            default: return false;
             }
         }
 
@@ -394,14 +393,14 @@ namespace heimdall
         {
             switch (kind)
             {
-                case GrammarKind::CompoundStatement:
-                case GrammarKind::LoopStatement:
-                case GrammarKind::SwitchStatement:
-                case GrammarKind::IfStatement:
-                case GrammarKind::TryStatement:
-                case GrammarKind::DoStatement:
-                case GrammarKind::LambdaExpression: return true;
-                default: return false;
+            case GrammarKind::CompoundStatement:
+            case GrammarKind::LoopStatement:
+            case GrammarKind::SwitchStatement:
+            case GrammarKind::IfStatement:
+            case GrammarKind::TryStatement:
+            case GrammarKind::DoStatement:
+            case GrammarKind::LambdaExpression: return true;
+            default: return false;
             }
         }
 
@@ -463,26 +462,26 @@ namespace heimdall
             // parameter or body local stops at ParameterDeclaration/CompoundStatement.
             switch (kind)
             {
-                case GrammarKind::Declarator:
-                case GrammarKind::InitDeclarator:
-                case GrammarKind::Declaration:
-                case GrammarKind::TypeSpecifier:
-                case GrammarKind::FunctionSuffix:
-                case GrammarKind::PointerOperator:
-                case GrammarKind::NestedNameSpecifier:
-                case GrammarKind::ArraySuffix:
-                case GrammarKind::TrailingReturnType:
-                case GrammarKind::NoexceptSpecifier:
-                case GrammarKind::AttributeSpecifier:
-                case GrammarKind::BitfieldSuffix:
-                case GrammarKind::TemplateDeclaration:
-                case GrammarKind::TemplateArgument:
-                case GrammarKind::FunctionDefinition:
-                case GrammarKind::FunctionDeclaration:
-                case GrammarKind::Enumerator:
-                case GrammarKind::RequiresClause:
-                case GrammarKind::DeclaredName: return true;
-                default: return false;
+            case GrammarKind::Declarator:
+            case GrammarKind::InitDeclarator:
+            case GrammarKind::Declaration:
+            case GrammarKind::TypeSpecifier:
+            case GrammarKind::FunctionSuffix:
+            case GrammarKind::PointerOperator:
+            case GrammarKind::NestedNameSpecifier:
+            case GrammarKind::ArraySuffix:
+            case GrammarKind::TrailingReturnType:
+            case GrammarKind::NoexceptSpecifier:
+            case GrammarKind::AttributeSpecifier:
+            case GrammarKind::BitfieldSuffix:
+            case GrammarKind::TemplateDeclaration:
+            case GrammarKind::TemplateArgument:
+            case GrammarKind::FunctionDefinition:
+            case GrammarKind::FunctionDeclaration:
+            case GrammarKind::Enumerator:
+            case GrammarKind::RequiresClause:
+            case GrammarKind::DeclaredName: return true;
+            default: return false;
             }
         }
 
@@ -1223,18 +1222,18 @@ namespace heimdall
                 if (parent >= tree.Nodes().size() || parent == current) break;
                 switch (tree.Nodes()[parent].kind)
                 {
-                    case GrammarKind::Declarator:
-                    case GrammarKind::InitDeclarator:
-                    case GrammarKind::Declaration:
-                    case GrammarKind::ParameterDeclaration:
-                    case GrammarKind::FunctionDefinition:
-                    case GrammarKind::FunctionDeclaration:
-                    case GrammarKind::TemplateDeclaration:
-                    case GrammarKind::TypeSpecifier:
-                    case GrammarKind::UsingDeclaration:
-                    case GrammarKind::ConceptDefinition:
-                    case GrammarKind::Enumerator: current = parent; continue;
-                    default: break;
+                case GrammarKind::Declarator:
+                case GrammarKind::InitDeclarator:
+                case GrammarKind::Declaration:
+                case GrammarKind::ParameterDeclaration:
+                case GrammarKind::FunctionDefinition:
+                case GrammarKind::FunctionDeclaration:
+                case GrammarKind::TemplateDeclaration:
+                case GrammarKind::TypeSpecifier:
+                case GrammarKind::UsingDeclaration:
+                case GrammarKind::ConceptDefinition:
+                case GrammarKind::Enumerator: current = parent; continue;
+                default: break;
                 }
                 break;
             }
@@ -1423,11 +1422,16 @@ namespace heimdall
 
     ScopeIndex CompletionEngine::IndexScopes(std::string_view source, const ParserOptions& options)
     {
-        const std::vector<Token> tokens = Lexer(source).Lex();
         const ParseTree tree = ParseTree::Parse(source, options);
+        return IndexScopes(tree);
+    }
+
+    ScopeIndex CompletionEngine::IndexScopes(const ParseTree& tree)
+    {
+        const std::string_view source = tree.Source();
+        const std::vector<Token>& tokens = tree.Tokens();
         ScopeIndex index;
-        // Merged-by-path lookup: was a linear scan per scope (O(S^2) over the
-        // headers' scopes). Paths are '\0'-joined; scope names never contain NUL.
+
         std::unordered_map<std::string, std::size_t> entry_pos;
         auto path_key = [](const std::vector<std::string>& path) {
             std::string key;
