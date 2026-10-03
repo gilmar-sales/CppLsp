@@ -15,6 +15,7 @@ enum class CompletionKind : std::uint8_t
 {
     Keyword,
     Type,
+    Namespace,
     Function,
     Variable,
     Macro,

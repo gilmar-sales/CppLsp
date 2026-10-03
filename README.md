@@ -70,7 +70,8 @@ Open `vscode-extension/` in VS Code and press F5 to launch the Extension Develop
 Host. It provides C/C++ diagnostics (rule lints plus parser-based `HEIMDALL900`
 syntax errors using the file's `compile_commands.json` dialect and macros),
 `NULL` quick fixes, the current
-brace-indent formatter, and word/local-symbol code completion. Set `heimdall.serverPath` if the server is not found in the
+brace-indent formatter, and scope-aware code completion (visible locals and
+parameters, plus `ns::`, `Type::` and `::global` qualified lookup). Set `heimdall.serverPath` if the server is not found in the
 workspace build directory or `PATH`. This replaces the lint/format portion of
 Microsoft's extension; full IntelliSense (member completion after `.`/`->`),
 debugging, and build integration are not implemented yet.
@@ -94,9 +95,10 @@ bench/                  # Google Benchmark suite (explicit sources) + corpus
 ```
 
 Binaries land in `build/src/heimdall` and `build/lsp/heimdall-lsp`
-(`build/test/Tests_run`, `build/bench/CoreBench`). Close the running
-`heimdall-lsp` (VS Code) before relinking on Windows, or point
-`heimdall.serverPath` at a copy.
+(`build/test/Tests_run`, `build/bench/CoreBench`). The VS Code extension
+launches a staged copy from its global storage, so relinking while it runs
+works on Windows; only a directly launched `heimdall-lsp` (e.g. via `PATH`
+outside the extension) still needs to be closed before relinking.
 
 ## Implemented core stages
 

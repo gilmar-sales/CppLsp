@@ -330,6 +330,7 @@ int ToLspKind(heimdall::CompletionKind kind)
     case heimdall::CompletionKind::Function: return 3;
     case heimdall::CompletionKind::Variable: return 6;
     case heimdall::CompletionKind::Type: return 7;
+    case heimdall::CompletionKind::Namespace: return 9;
     case heimdall::CompletionKind::Macro: return 21;
     case heimdall::CompletionKind::Directive:
     case heimdall::CompletionKind::Keyword: return 14;

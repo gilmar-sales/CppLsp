@@ -7,6 +7,7 @@ import {
     ServerOptions,
     Trace,
 } from 'vscode-languageclient/node';
+import { stageServerBinary } from './serverStaging';
 
 let client: LanguageClient | undefined;
 let output: vscode.OutputChannel;
@@ -39,6 +40,11 @@ function findServer(configuredPath: string, extensionPath: string): string {
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
     const configuration = vscode.workspace.getConfiguration('heimdall');
     const serverPath = findServer(configuration.get<string>('serverPath', 'heimdall-lsp'), context.extensionPath);
+    const stagedServerPath = stageServerBinary(
+        serverPath,
+        path.join(context.globalStorageUri.fsPath, 'bin'),
+        (message): void => output.appendLine(message),
+    );
     const trace = configuration.get<string>('trace.server', 'off');
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const configuredDatabase = configuration.get<string>('compileCommands', 'build/compile_commands.json');
@@ -53,8 +59,12 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
     }
 
     const serverOptions: ServerOptions = {
-        run: { command: serverPath, args: [] },
-        debug: { command: serverPath, args: [] },
+        // Launch a staged copy under the extension's global storage
+        // (%APPDATA%/Code/User/globalStorage on Windows, ~/.config/Code/... on
+        // Linux, ~/Library/Application Support/Code/... on macOS) so rebuilding
+        // the server never hits a file lock held by the running instance.
+        run: { command: stagedServerPath, args: [] },
+        debug: { command: stagedServerPath, args: [] },
     };
     const clientOptions: LanguageClientOptions = {
         documentSelector: [
@@ -78,7 +88,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
 
     try {
         await client.start();
-        output.appendLine(`Started ${serverPath}`);
+        output.appendLine(`Started ${stagedServerPath}`);
     } catch (error) {
         const message = `Could not start heimdall-lsp at '${serverPath}': ${String(error)}`;
         output.appendLine(message);

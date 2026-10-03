@@ -2,7 +2,8 @@
 
 Independent C/C++ language tooling powered by the Heimdall Language Server. It
 provides diagnostics, quick fixes for supported lint rules, brace-depth
-formatting, and word/local-symbol code completion. It does not currently provide
+formatting, and scope-aware code completion (visible locals/parameters plus
+`ns::`, `Type::` and `::global` qualified lookup). It does not currently provide
 debugging, build-system integration, or full C++ navigation (member completion
 after `.`/`->` is not yet modeled).
 
@@ -17,7 +18,9 @@ cmake --build build --target heimdall-lsp --config Debug
 
 The extension searches `build/` and `build/Debug/` in the opened workspace, then
 falls back to `heimdall-lsp` on `PATH`. Override the path with the VS Code setting
-`heimdall.serverPath`.
+`heimdall.serverPath`. Before launching, the extension copies the server into its
+global storage and runs the copy, so rebuilding while VS Code is open never hits
+a Windows file lock — just rebuild and Reload Window to pick the new binary up.
 
 Optional local semantic diagnostics can be enabled with `heimdall.enableSemantic`.
 Set `heimdall.compileCommands` to the database path (default:

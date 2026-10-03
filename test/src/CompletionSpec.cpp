@@ -190,19 +190,151 @@ TEST(CompletionSpec, ClassifiesLocalsAndParametersAsVariables)
 {
     constexpr std::string_view source =
         "int compute(int myParam) {\n"
-        "  int myLocal = myParam;\n"
-        "  return myLocal;\n"
+        "  int myLocal = myPa;\n"
+        "  return myL;\n"
         "}\n";
-    const auto items = heimdall::CompletionEngine::Complete(source, 0);
-    const auto* local = Find(items, "myLocal");
-    ASSERT_NE(local, nullptr) << "expected myLocal among completions";
-    EXPECT_EQ(local->kind, heimdall::CompletionKind::Variable);
-    const auto* param = Find(items, "myParam");
+    const std::size_t param_pos = source.find("= myPa") + 5;
+    const auto params = heimdall::CompletionEngine::Complete(source, param_pos);
+    const auto* param = Find(params, "myParam");
     ASSERT_NE(param, nullptr) << "expected myParam among completions";
     EXPECT_EQ(param->kind, heimdall::CompletionKind::Variable);
-    const auto* function = Find(items, "compute");
-    ASSERT_NE(function, nullptr);
-    EXPECT_EQ(function->kind, heimdall::CompletionKind::Function);
+    const std::size_t local_pos = source.rfind("myL") + 3;
+    const auto locals = heimdall::CompletionEngine::Complete(source, local_pos);
+    const auto* local = Find(locals, "myLocal");
+    ASSERT_NE(local, nullptr) << "expected myLocal among completions";
+    EXPECT_EQ(local->kind, heimdall::CompletionKind::Variable);
+}
+
+TEST(CompletionSpec, HidesLocalsFromOtherFunctions)
+{
+    constexpr std::string_view source =
+        "void first() {\n"
+        "  int alpha_local = 1;\n"
+        "  consume(alpha_local);\n"
+        "}\n"
+        "void second() {\n"
+        "  int alpha_second = 2;\n"
+        "  int x = alpha_;\n"
+        "}\n";
+    const std::size_t pos = source.rfind("alpha_") + 6;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    EXPECT_TRUE(Contains(items, "alpha_second"));
+    EXPECT_FALSE(Contains(items, "alpha_local"));
+}
+
+TEST(CompletionSpec, HidesDeclarationsAfterCursor)
+{
+    constexpr std::string_view source =
+        "void f() {\n"
+        "  int x = late_;\n"
+        "  int late_value = 1;\n"
+        "}\n";
+    const std::size_t pos = source.find("late_") + 5;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    EXPECT_FALSE(Contains(items, "late_value"));
+}
+
+TEST(CompletionSpec, SuggestsParametersOnlyInsideTheirFunction)
+{
+    constexpr std::string_view source =
+        "int sum(int first_arg, int second_arg) {\n"
+        "  return first_;\n"
+        "}\n"
+        "int other() {\n"
+        "  return first_;\n"
+        "}\n";
+    const std::size_t inside = source.find("return first_") + 13;
+    EXPECT_TRUE(Contains(heimdall::CompletionEngine::Complete(source, inside), "first_arg"));
+    const std::size_t outside = source.rfind("return first_") + 13;
+    const auto outer = heimdall::CompletionEngine::Complete(source, outside);
+    EXPECT_FALSE(Contains(outer, "first_arg"));
+    EXPECT_FALSE(Contains(outer, "second_arg"));
+}
+
+TEST(CompletionSpec, ResolvesNamespaceMembers)
+{
+    constexpr std::string_view source =
+        "int global_item = 1;\n"
+        "namespace tools {\n"
+        "int tool_item = 2;\n"
+        "int tool_other = 3;\n"
+        "}\n"
+        "int x = tools::tool_i;\n";
+    const std::size_t pos = source.rfind("tool_i") + 6;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    EXPECT_TRUE(Contains(items, "tool_item"));
+    EXPECT_FALSE(Contains(items, "tool_other"));
+    EXPECT_FALSE(Contains(items, "global_item"));
+}
+
+TEST(CompletionSpec, ResolvesNestedNamespaces)
+{
+    constexpr std::string_view source =
+        "namespace outer {\n"
+        "namespace inner {\n"
+        "int deep_item = 1;\n"
+        "}\n"
+        "int shallow_item = 2;\n"
+        "}\n"
+        "int a = outer::inner::deep_;\n"
+        "int b = outer::shallow_;\n";
+    const std::size_t deep = source.find("deep_;") + 5;
+    const auto deep_items = heimdall::CompletionEngine::Complete(source, deep);
+    EXPECT_TRUE(Contains(deep_items, "deep_item"));
+
+    const std::size_t shallow = source.find("shallow_;") + 8;
+    const auto shallow_items = heimdall::CompletionEngine::Complete(source, shallow);
+    EXPECT_TRUE(Contains(shallow_items, "shallow_item"));
+    EXPECT_FALSE(Contains(shallow_items, "deep_item"));
+}
+
+TEST(CompletionSpec, UnknownQualifierOffersNothing)
+{
+    constexpr std::string_view source =
+        "namespace tools {\n"
+        "int tool_item = 1;\n"
+        "}\n"
+        "int x = nope::tool_;\n";
+    EXPECT_TRUE(heimdall::CompletionEngine::Complete(source, source.size() - 2).empty());
+}
+
+TEST(CompletionSpec, ResolvesScopedEnumMembers)
+{
+    constexpr std::string_view source =
+        "enum class Color { Red, Green };\n"
+        "int compute() { return 0; }\n"
+        "Color c = Color::R;\n";
+    const std::size_t pos = source.find("Color::R") + 8;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    EXPECT_TRUE(Contains(items, "Red"));
+    EXPECT_FALSE(Contains(items, "Green"));
+    EXPECT_FALSE(Contains(items, "compute"));
+
+    constexpr std::string_view all_source =
+        "enum class Color { Red, Green };\n"
+        "int compute() { return 0; }\n"
+        "Color c2 = Color::;\n";
+    const std::size_t all_pos = all_source.find("Color::") + 7;
+    const auto all = heimdall::CompletionEngine::Complete(all_source, all_pos);
+    EXPECT_TRUE(Contains(all, "Red"));
+    EXPECT_TRUE(Contains(all, "Green"));
+    EXPECT_FALSE(Contains(all, "compute"));
+}
+
+TEST(CompletionSpec, GlobalQualifierListsGlobalsWithoutLocalsOrKeywords)
+{
+    constexpr std::string_view source =
+        "int gvalue = 1;\n"
+        "void f() {\n"
+        "  int gotham = 2;\n"
+        "  consume(gotham);\n"
+        "}\n"
+        "int y = ::g;\n";
+    const std::size_t pos = source.rfind("::g") + 3;
+    const auto items = heimdall::CompletionEngine::Complete(source, pos);
+    EXPECT_TRUE(Contains(items, "gvalue"));
+    EXPECT_FALSE(Contains(items, "gotham"));
+    EXPECT_FALSE(Contains(items, "goto"));
 }
 
 TEST(CompletionSpec, ResultsAreDeduplicatedAndSorted)
