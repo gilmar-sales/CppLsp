@@ -143,6 +143,7 @@ namespace heimdall::lsp
         std::atomic<bool> m_enable_semantic = false;
         std::string m_initialization_error;
         std::condition_variable_any m_index_cv;
+        std::mutex m_index_mu;
         std::mutex m_diag_mu;
         std::condition_variable_any m_diag_cv;
         std::deque<DiagJob> m_diag_queue;
